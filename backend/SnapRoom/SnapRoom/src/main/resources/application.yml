@@ -1,0 +1,40 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: SnapRoom
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/snaproom}
+    username: ${SPRING_DATASOURCE_USERNAME:snaproom}
+    password: ${SPRING_DATASOURCE_PASSWORD:secretpassword}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+    show-sql: false
+  servlet:
+    multipart:
+      max-file-size: 15MB
+      max-request-size: 20MB
+
+jwt:
+  secret: ${JWT_SECRET:snaproom-super-secret-key-that-is-at-least-256-bits-long-for-jwt-signing-2026!}
+  expiration-ms: 604800000
+
+ai:
+  service:
+    url: ${AI_SERVICE_URL:http://localhost:8001}
+
+storage:
+  endpoint: ${STORAGE_ENDPOINT:}
+  region: ${STORAGE_REGION:auto}
+  bucket-name: ${STORAGE_BUCKET_NAME:snaproom-photos}
+
+aws:
+  access-key-id: ${AWS_ACCESS_KEY_ID:test}
+  secret-access-key: ${AWS_SECRET_ACCESS_KEY:test}
