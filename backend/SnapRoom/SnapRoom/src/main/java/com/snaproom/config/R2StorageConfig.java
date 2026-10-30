@@ -1,5 +1,6 @@
 package com.snaproom.config;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,26 +14,46 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 import java.net.URI;
 
+/**
+ * Cloudflare R2 Object Storage Configuration.
+ * Cloudflare R2 implements the S3-compatible API protocol.
+ * The standard AWS SDK for Java v2 (software.amazon.awssdk:s3) connects directly
+ * to the Cloudflare R2 endpoint: https://<account_id>.r2.cloudflarestorage.com.
+ */
+@Slf4j
 @Configuration
-public class S3Config {
+public class R2StorageConfig {
 
-    @Value("${storage.endpoint:}")
+    @Value("${storage.endpoint:${r2.endpoint:}}")
     private String endpoint;
 
-    @Value("${storage.region:auto}")
+    @Value("${storage.account-id:${r2.account-id:}}")
+    private String accountId;
+
+    @Value("${storage.region:${r2.region:auto}}")
     private String region;
 
-    @Value("${aws.access-key-id:test}")
+    @Value("${storage.access-key-id:${r2.access-key-id:${aws.access-key-id:test}}}")
     private String accessKey;
 
-    @Value("${aws.secret-access-key:test}")
+    @Value("${storage.secret-access-key:${r2.secret-access-key:${aws.secret-access-key:test}}}")
     private String secretKey;
+
+    private URI resolveEndpointUri() {
+        if (endpoint != null && !endpoint.isBlank()) {
+            return URI.create(endpoint);
+        }
+        if (accountId != null && !accountId.isBlank()) {
+            return URI.create("https://" + accountId + ".r2.cloudflarestorage.com");
+        }
+        return null;
+    }
 
     private Region resolveRegion() {
         if (region != null && !region.isBlank() && !region.equalsIgnoreCase("auto")) {
             return Region.of(region);
         }
-        return Region.US_EAST_1;
+        return Region.of("auto");
     }
 
     private StaticCredentialsProvider credentialsProvider() {
@@ -43,6 +64,9 @@ public class S3Config {
 
     @Bean
     public S3Client s3Client() {
+        URI endpointUri = resolveEndpointUri();
+        log.info("Configuring Cloudflare R2 client (endpoint: {}, region: {})", endpointUri, resolveRegion());
+
         S3ClientBuilder builder = S3Client.builder()
                 .region(resolveRegion())
                 .credentialsProvider(credentialsProvider())
@@ -50,8 +74,8 @@ public class S3Config {
                         .pathStyleAccessEnabled(true)
                         .build());
 
-        if (endpoint != null && !endpoint.isBlank()) {
-            builder.endpointOverride(URI.create(endpoint));
+        if (endpointUri != null) {
+            builder.endpointOverride(endpointUri);
         }
 
         return builder.build();
@@ -59,6 +83,9 @@ public class S3Config {
 
     @Bean
     public S3Presigner s3Presigner() {
+        URI endpointUri = resolveEndpointUri();
+        log.info("Configuring Cloudflare R2 presigner (endpoint: {})", endpointUri);
+
         S3Presigner.Builder builder = S3Presigner.builder()
                 .region(resolveRegion())
                 .credentialsProvider(credentialsProvider())
@@ -66,8 +93,8 @@ public class S3Config {
                         .pathStyleAccessEnabled(true)
                         .build());
 
-        if (endpoint != null && !endpoint.isBlank()) {
-            builder.endpointOverride(URI.create(endpoint));
+        if (endpointUri != null) {
+            builder.endpointOverride(endpointUri);
         }
 
         return builder.build();

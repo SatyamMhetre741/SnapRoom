@@ -6,14 +6,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.*;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest;
 
 import java.time.Duration;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -23,11 +22,14 @@ public class StorageService {
     private final S3Client s3Client;
     private final S3Presigner s3Presigner;
 
-    @Value("${storage.bucket-name:snaproom-photos}")
+    @Value("${storage.bucket-name:${r2.bucket-name:snaproom-photos}}")
     private String bucketName;
 
+    @Value("${storage.public-url:${r2.public-url:}}")
+    private String publicUrl;
+
     /**
-     * Generates a presigned PUT URL for direct browser uploads.
+     * Generates a presigned PUT URL for direct browser uploads to Cloudflare R2.
      */
     public String generatePresignedPutUrl(String objectKey, String contentType, Duration expiration) {
         PutObjectRequest.Builder requestBuilder = PutObjectRequest.builder()
@@ -47,9 +49,16 @@ public class StorageService {
     }
 
     /**
-     * Generates a presigned GET URL for secure gallery display.
+     * Generates a view URL for Cloudflare R2.
+     * If a public CDN URL or custom domain is configured, returns direct public URL ($0 egress).
+     * Otherwise generates a 1-hour presigned GET URL via Cloudflare R2.
      */
     public String generatePresignedGetUrl(String objectKey, Duration expiration) {
+        if (publicUrl != null && !publicUrl.isBlank()) {
+            String baseUrl = publicUrl.endsWith("/") ? publicUrl.substring(0, publicUrl.length() - 1) : publicUrl;
+            return baseUrl + "/" + objectKey;
+        }
+
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(bucketName)
                 .key(objectKey)
@@ -86,4 +95,93 @@ public class StorageService {
 
         return s3Client.getObject(getObjectRequest);
     }
+
+    /**
+     * Deletes a single object from storage.
+     */
+    public void deleteObject(String objectKey) {
+        if (objectKey == null || objectKey.isBlank()) return;
+        try {
+            DeleteObjectRequest deleteRequest = DeleteObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(objectKey)
+                    .build();
+            s3Client.deleteObject(deleteRequest);
+            log.debug("Deleted object {} from S3", objectKey);
+        } catch (Exception ex) {
+            log.warn("Failed to delete object {} from S3: {}", objectKey, ex.getMessage());
+        }
+    }
+
+    /**
+     * Batch deletes a list of objects from storage.
+     */
+    public void deleteObjects(List<String> objectKeys) {
+        if (objectKeys == null || objectKeys.isEmpty()) return;
+
+        List<ObjectIdentifier> identifiers = objectKeys.stream()
+                .filter(k -> k != null && !k.isBlank())
+                .map(k -> ObjectIdentifier.builder().key(k).build())
+                .toList();
+
+        if (identifiers.isEmpty()) return;
+
+        for (int i = 0; i < identifiers.size(); i += 1000) {
+            List<ObjectIdentifier> batch = identifiers.subList(i, Math.min(i + 1000, identifiers.size()));
+            try {
+                DeleteObjectsRequest deleteRequest = DeleteObjectsRequest.builder()
+                        .bucket(bucketName)
+                        .delete(Delete.builder().objects(batch).quiet(true).build())
+                        .build();
+                s3Client.deleteObjects(deleteRequest);
+                log.info("Batch deleted {} objects from S3 bucket {}", batch.size(), bucketName);
+            } catch (Exception ex) {
+                log.error("Failed to delete batch of objects from S3: {}", ex.getMessage(), ex);
+            }
+        }
+    }
+
+    /**
+     * Deletes all objects in storage matching a given key prefix (e.g. 'rooms/{roomId}/').
+     */
+    public void deleteObjectsWithPrefix(String prefix) {
+        if (prefix == null || prefix.isBlank()) return;
+
+        try {
+            ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
+                    .bucket(bucketName)
+                    .prefix(prefix)
+                    .build();
+
+            ListObjectsV2Response listResponse;
+            do {
+                listResponse = s3Client.listObjectsV2(listRequest);
+                List<ObjectIdentifier> toDelete = listResponse.contents().stream()
+                        .map(s3Object -> ObjectIdentifier.builder().key(s3Object.key()).build())
+                        .toList();
+
+                if (!toDelete.isEmpty()) {
+                    for (int i = 0; i < toDelete.size(); i += 1000) {
+                        List<ObjectIdentifier> batch = toDelete.subList(i, Math.min(i + 1000, toDelete.size()));
+                        DeleteObjectsRequest deleteRequest = DeleteObjectsRequest.builder()
+                                .bucket(bucketName)
+                                .delete(Delete.builder().objects(batch).quiet(true).build())
+                                .build();
+                        s3Client.deleteObjects(deleteRequest);
+                    }
+                    log.info("Deleted {} objects with prefix '{}' from S3", toDelete.size(), prefix);
+                }
+
+                String continuationToken = listResponse.nextContinuationToken();
+                if (continuationToken != null) {
+                    listRequest = listRequest.toBuilder().continuationToken(continuationToken).build();
+                } else {
+                    break;
+                }
+            } while (listResponse.isTruncated());
+        } catch (Exception ex) {
+            log.error("Failed to delete objects with prefix '{}' from S3: {}", prefix, ex.getMessage(), ex);
+        }
+    }
 }
+

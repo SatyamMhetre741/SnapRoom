@@ -31,10 +31,17 @@ ai:
     url: ${AI_SERVICE_URL:http://localhost:8001}
 
 storage:
-  endpoint: ${STORAGE_ENDPOINT:}
-  region: ${STORAGE_REGION:auto}
-  bucket-name: ${STORAGE_BUCKET_NAME:snaproom-photos}
+  endpoint: ${STORAGE_ENDPOINT:${R2_ENDPOINT:}}
+  account-id: ${R2_ACCOUNT_ID:}
+  region: ${STORAGE_REGION:${R2_REGION:auto}}
+  bucket-name: ${STORAGE_BUCKET_NAME:${R2_BUCKET_NAME:snaproom-photos}}
+  access-key-id: ${R2_ACCESS_KEY_ID:${AWS_ACCESS_KEY_ID:test}}
+  secret-access-key: ${R2_SECRET_ACCESS_KEY:${AWS_SECRET_ACCESS_KEY:test}}
+  public-url: ${R2_PUBLIC_URL:}
 
-aws:
-  access-key-id: ${AWS_ACCESS_KEY_ID:test}
-  secret-access-key: ${AWS_SECRET_ACCESS_KEY:test}
+
+room:
+  ttl-days: ${ROOM_TTL_DAYS:2}
+  cleanup:
+    fixed-rate-ms: ${ROOM_CLEANUP_RATE_MS:1800000}
+    initial-delay-ms: ${ROOM_CLEANUP_INITIAL_DELAY_MS:60000}

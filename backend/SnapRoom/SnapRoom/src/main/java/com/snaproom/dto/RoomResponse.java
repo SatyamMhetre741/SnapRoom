@@ -9,6 +9,7 @@ public record RoomResponse(
     String name,
     UUID leaderId,
     Instant createdAt,
+    Instant expiresAt,
     long memberCount,
     long photoCount,
     String userRole

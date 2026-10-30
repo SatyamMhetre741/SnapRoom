@@ -14,4 +14,6 @@ public class CreateRoomRequest {
 
     @NotBlank(message = "Room name is required")
     private String name;
+
+    private Long ttlDays;
 }

@@ -33,4 +33,9 @@ public interface PhotoUserMatchRepository extends JpaRepository<PhotoUserMatch, 
         @Param("similarityScore") float similarityScore,
         @Param("createdAt") Instant createdAt
     );
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM PhotoUserMatch pum WHERE pum.room.id = :roomId")
+    void deleteByRoomId(@Param("roomId") UUID roomId);
 }

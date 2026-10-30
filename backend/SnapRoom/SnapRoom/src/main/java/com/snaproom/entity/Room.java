@@ -31,4 +31,18 @@ public class Room {
     @Builder.Default
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
+
+    @Column(name = "expires_at", nullable = false)
+    private Instant expiresAt;
+
+    @PrePersist
+    public void prePersist() {
+        if (createdAt == null) {
+            createdAt = Instant.now();
+        }
+        if (expiresAt == null) {
+            expiresAt = createdAt.plus(java.time.Duration.ofDays(2));
+        }
+    }
 }
+

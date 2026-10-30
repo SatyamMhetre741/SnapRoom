@@ -171,4 +171,20 @@ public class RoomController {
                 .contentType(MediaType.parseMediaType("application/zip"))
                 .body(responseBody);
     }
+
+    /**
+     * DELETE /api/rooms/{roomId}: Explicitly deletes a room, all its photos from S3/R2 storage, and all records from database.
+     * Allowed only for the room LEADER.
+     */
+    @DeleteMapping("/{roomId}")
+    public ResponseEntity<Void> deleteRoom(
+            @PathVariable UUID roomId,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        roomService.deleteRoom(roomId, principal.getId());
+        return ResponseEntity.noContent().build();
+    }
 }

@@ -4,6 +4,7 @@ import com.snaproom.entity.Room;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -12,4 +13,6 @@ import java.util.UUID;
 public interface RoomRepository extends JpaRepository<Room, UUID> {
     Optional<Room> findByInviteCode(String inviteCode);
     List<Room> findByLeaderId(UUID leaderId);
+    List<Room> findByExpiresAtBefore(Instant now);
 }
+

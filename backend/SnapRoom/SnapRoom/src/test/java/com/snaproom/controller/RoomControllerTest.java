@@ -26,6 +26,8 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doNothing;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -59,12 +61,16 @@ class RoomControllerTest {
         UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
         SecurityContextHolder.getContext().setAuthentication(auth);
 
+        Instant now = Instant.now();
+        Instant expiresAt = now.plus(java.time.Duration.ofDays(2));
+
         RoomResponse response = new RoomResponse(
                 roomId,
                 "fest-2026",
                 "Tech Gala 2026",
                 userId,
-                Instant.now(),
+                now,
+                expiresAt,
                 1,
                 0,
                 "LEADER"
@@ -91,13 +97,15 @@ class RoomControllerTest {
     void testGetRoomByInviteCode() throws Exception {
         UUID roomId = UUID.randomUUID();
         UUID leaderId = UUID.randomUUID();
+        Instant now = Instant.now();
 
         RoomResponse response = new RoomResponse(
                 roomId,
                 "party-demo",
                 "Birthday Bash",
                 leaderId,
-                Instant.now(),
+                now,
+                now.plus(java.time.Duration.ofDays(2)),
                 5,
                 18,
                 "MEMBER"
@@ -128,5 +136,21 @@ class RoomControllerTest {
                 .andExpect(jsonPath("$.processingCount").value(3))
                 .andExpect(jsonPath("$.completedCount").value(15))
                 .andExpect(jsonPath("$.isProcessing").value(true));
+    }
+
+    @Test
+    @DisplayName("DELETE /api/rooms/{roomId} should delete room and return 204 No Content")
+    void testDeleteRoom() throws Exception {
+        UUID userId = UUID.randomUUID();
+        UUID roomId = UUID.randomUUID();
+        UserPrincipal principal = new UserPrincipal(userId, "leader@snaproom.local", "Leader User", "");
+        UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+        SecurityContextHolder.getContext().setAuthentication(auth);
+
+        doNothing().when(roomService).deleteRoom(roomId, userId);
+
+        mockMvc.perform(delete("/api/rooms/" + roomId)
+                        .principal(auth))
+                .andExpect(status().isNoContent());
     }
 }
