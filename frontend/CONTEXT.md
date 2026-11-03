@@ -1,32 +1,34 @@
 # Frontend Agent Context (`frontend/`)
 
-## 1. Tech Stack & Role
-- **Framework:** React 18+ with Next.js (App Router) or Vite + TypeScript.
-- **Styling:** Tailwind CSS + Lucide Icons.
-- **Camera & Face Framing:** Native HTML5 `navigator.mediaDevices.getUserMedia` with `<video>` and `<canvas>` elements (optionally enhanced with `@mediapipe/tasks-vision` for live face bounding box feedback).
-- **File Uploads:** Direct-to-S3/R2 `PUT` requests using `fetch` / `XMLHttpRequest` (or `@uppy/aws-s3`) via presigned URLs issued by Spring Boot.
+## Role
 
-## 2. Directory Responsibilities
-- `src/components/` — Reusable UI components:
-  - `WebcamEnroll.tsx`: Opens front camera (`1280x720`, `facingMode: "user"`), renders video preview, captures a frame to `<canvas>`, exports a `image/jpeg` Blob, and submits it to `POST /api/rooms/{inviteCode}/enroll`.
-  - `PhotoUploader.tsx`: Drag-and-drop multi-file uploader for room leaders. Validates file type (`image/jpeg`, `image/png`, `image/webp`) and max size (`15 MB`). Requests presigned `PUT` URLs, uploads directly to storage, and calls `POST /api/rooms/{roomId}/process-photos` when the batch finishes.
-  - `RoomGallery.tsx`: Renders a toggle between two tabs: **"For You (My Photos)"** (matched by face) and **"All Room Photos"**. Supports multi-select checkboxes and lightbox preview.
-  - `ZipDownloadButton.tsx`: Triggers `POST /api/rooms/{roomId}/download-zip` with the selected `objectKey` and `fileName` list, streaming the response blob as a browser download.
-- `src/app/` (or `src/pages/`) — Application screens and routes:
-  - `/` — Landing page, login/register, and "Create Room" / "Join with Code" actions.
-  - `/rooms/[inviteCode]/join` — Interstitial face enrollment gate before entering a room.
-  - `/rooms/[roomId]` — Main room workspace (header with invite QR/link, upload trigger for `LEADER`, processing status banner, and `RoomGallery`).
-- `src/services/` — Typed API clients:
-  - `apiClient.ts`: Axios/Fetch wrapper attaching `Authorization: Bearer <jwt>` headers.
-  - `roomService.ts`: Room CRUD, enrollment, gallery queries, and ZIP download calls.
-  - `uploadService.ts`: Presigned URL orchestration and direct S3/R2 `PUT` progress tracking.
-- `src/types/` — Shared TypeScript interfaces (`index.ts`):
-  - `User`, `Room`, `RoomRole` (`'LEADER' | 'MEMBER'`), `PhotoStatus` (`'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED'`).
-  - `PhotoItem` (`id`, `objectKey`, `fileName`, `presignedGetUrl`, `similarityScore?`, `createdAt`).
-  - `DownloadItemDto` (`objectKey: string`, `fileName: string`).
-- `.env.local.example` — Template containing `NEXT_PUBLIC_API_BASE_URL=http://localhost:8080/api`.
+Next.js/React + TypeScript is responsible for room UX and upload orchestration. It never sends photo bytes through Spring Boot and never calls the AI service.
 
-## 3. Frontend Implementation Rules
-1. **Never Upload Raw Photos Through Spring Boot When Using Presigned Flow:** Request presigned `PUT` URLs from `/api/rooms/{roomId}/presign-upload` and upload binary blobs directly to the storage URL with the matching `Content-Type` header.
-2. **Release Webcam Streams:** Always stop all media tracks (`stream.getTracks().forEach(t => t.stop())`) inside a cleanup effect immediately after selfie enrollment completes or the component unmounts.
-3. **Graceful Async Polling:** Because `@Async` photo routing on CPU takes ~380 ms per detected face, show a non-blocking "Sorting photos in the background..." indicator and poll room status every 5 seconds until pending photos transition to `COMPLETED`.
+## Upload flow
+
+1. The uploader selects files. Validate image MIME, extension, size, count, and reject unsafe names; compute a client id and optionally a checksum.
+2. Call `POST /api/rooms/{roomId}/upload-batches` with a manifest. Render the returned batch and photo ids.
+3. For each returned presigned R2 `PUT` URL, upload directly with the exact `Content-Type`; use bounded concurrency (3-5), progress, cancellation, and retry.
+4. After a 2xx PUT, call `POST /api/photos/{photoId}/complete-upload`. A PUT alone is not a completed application upload.
+5. Call `POST /api/upload-batches/{batchId}/finalize`. Show counts from the response and poll `GET /api/upload-batches/{batchId}/status` every 3-5 seconds.
+
+The client treats photo ids/object keys as opaque. It never persists or reuses an expired signed URL and never assumes the R2 ETag is a public URL.
+
+## Gallery behavior
+
+`All Room Photos` can render verified uploaded photos with a processing badge. `My Pics` renders only API results containing a backend-authorized short-lived `downloadUrl`; it is not built by filtering the all-photos response in the browser. Refresh the gallery after a batch reaches a terminal state. Handle 403/404 signed URL failures by refetching the page.
+
+## Required screens/components
+
+- room creation/join and face enrollment gate;
+- `PhotoUploader` with manifest -> presign -> PUT -> complete -> finalize states;
+- batch progress panel showing counts and failed items;
+- `RoomGallery` with `All Photos` and `My Pics` tabs;
+- processing/empty/error states and a retry action for failed photos;
+- signed-URL-aware lightbox and download controls.
+
+Stop webcam tracks on completion/unmount. Do not log selfies, image bytes, access tokens, presigned URLs, or embeddings.
+
+## API types
+
+Model `UploadBatch`, `UploadPhoto`, `PhotoProcessingStatus`, `GalleryPhoto`, `RoomMember`, and terminal states explicitly. The upload state machine is `AWAITING_UPLOAD`, `UPLOADED`, `QUEUED`, `PROCESSING`, `PROCESSED`, `NO_MATCHES`, `FAILED`; batch states are defined in the root context.

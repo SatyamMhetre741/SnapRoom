@@ -1,26 +1,37 @@
-# Database Agent Context (`database/`)
+# Database Agent Context (`db/`)
 
-## 1. Tech Stack & Role
-- **Engine:** PostgreSQL 16 with `uuid-ossp` and `pgvector` (`vector`) extensions (`pgvector/pgvector:pg16`).
-- **Role:** Single source of truth for relational entities (`users`, `rooms`, `photos`, `photo_user_matches`) and 512-dimensional facial embeddings (`room_members.embedding vector(512)`).
+PostgreSQL 16 + pgvector is the system of record. Use versioned migrations and explicit state constraints. UUIDs are preferred for public identifiers.
 
-## 2. Directory Responsibilities
-- `migrations/` — Versioned SQL migration scripts (compatible with Flyway or init scripts):
-  - `V1__enable_extensions.sql`: Enables `uuid-ossp` and `vector` extensions.
-  - `V2__create_core_tables.sql`: Creates the 5 core tables:
-    1. `users` (`id UUID PK`, `email UNIQUE`, `display_name`, `password_hash`, `created_at`).
-    2. `rooms` (`id UUID PK`, `invite_code VARCHAR(32) UNIQUE`, `name`, `leader_id UUID FK -> users`, `created_at`, `expires_at TIMESTAMP WITH TIME ZONE NOT NULL`).
-    3. `room_members` (`id UUID PK`, `room_id UUID FK -> rooms`, `user_id UUID FK -> users`, `role VARCHAR(20)`, `embedding vector(512) NOT NULL`, `enrolled_at`, `UNIQUE(room_id, user_id)`).
-    4. `photos` (`id UUID PK`, `room_id UUID FK -> rooms`, `uploader_id UUID FK -> users`, `object_key TEXT NOT NULL`, `file_name VARCHAR(255) NOT NULL`, `status VARCHAR(20) DEFAULT 'PENDING'`, `created_at`).
-    5. `photo_user_matches` (`id UUID PK`, `photo_id UUID FK -> photos`, `room_id UUID FK -> rooms`, `user_id UUID FK -> users`, `similarity_score REAL NOT NULL`, `created_at`, `UNIQUE(photo_id, user_id)`).
-  - `V3__create_indexes.sql`: Creates standard B-Tree indexes `idx_room_members_room ON room_members(room_id)` and `idx_matches_room_user ON photo_user_matches(room_id, user_id)`.
-- `schema/`
-  - `schema.sql`: Consolidated reference schema combining all tables, constraints, and indexes.
-- `seed/`
-  - `dev_seed.sql`: Inserts test users (`leader@snaproom.local`, `alice@snaproom.local`, `bob@snaproom.local`), a sample room (`invite_code = 'party-demo'`), and sample 512-dimensional normalized test vectors for local integration testing.
+## Tables
 
-## 3. Query & Indexing Rules
-1. **No HNSW / IVFFlat Needed in MVP:** Because queries always filter by `WHERE room_id = :roomId` first and a typical room has fewer than 500 members, a standard B-Tree index on `room_id` performs an exact scan in under 1 millisecond.
-2. **Cosine Similarity Formula:** Always compute similarity as `1 - (embedding <=> CAST(:probeVector AS vector))` using `pgvector`'s cosine distance operator (`<=>`) against a default match threshold of `0.50`.
-3. **Idempotent Match Upserts:** When inserting into `photo_user_matches` (in case a photo is reprocessed or a user's face appears twice by mistake), always use `ON CONFLICT (photo_id, user_id) DO UPDATE SET similarity_score = GREATEST(photo_user_matches.similarity_score, EXCLUDED.similarity_score)`.
-4. **Room TTL & Automated Purge:** Rooms expire after 2 days (`expires_at = created_at + 2 days`). A scheduled cleanup task purges expired rooms, deleting all image objects from S3/R2 storage, and cascades deletion across `photo_user_matches`, `photos`, `room_members`, and `rooms`.
+1. `users`: identity and account timestamps.
+2. `rooms`: name, invite code, leader, lifecycle, timestamps.
+3. `room_members`: room/user/role, active state, joined timestamps, unique `(room_id,user_id)`.
+4. `room_member_embeddings`: member id, normalized `vector(512)`, model version, consent/enrolled timestamps, revoked timestamp. Keep biometric data separate from membership so it can be deleted independently.
+5. `upload_batches`: room, uploader, client batch id, expected/verified counts, state, timestamps, unique `(room_id, client_batch_id)`.
+6. `photos`: room, batch, uploader, client photo id, object key, original filename, MIME, bytes, checksum/ETag, processing state, model/threshold version, error code, timestamps. Unique `(batch_id, client_photo_id)` and unique `(room_id, object_key)`.
+7. `photo_faces`: photo, face index, confidence, bbox, embedding vector, model version. Unique `(photo_id, face_index)`; delete/rewrite for a new photo version.
+8. `photo_user_matches`: photo, room, user, best similarity, embedding/model version, timestamps. Unique `(photo_id,user_id)` and FK to the same room. This is the table used for My Pics.
+9. `photo_processing_jobs`: photo, operation, status, attempt count, available_at, lease_until, worker id, last error, completed timestamps. Unique `(photo_id, operation, model_version)`.
+10. `outbox_events`: event id, aggregate/photo id, event type, JSON payload, delivery state, attempts, next attempt, timestamps. Unique event id; optional if jobs are inserted directly in the same transaction, but retain it if an external queue will be added.
+11. `audit_events`: actor, room, action, target, safe metadata, timestamp; never store image bytes, tokens, signed URLs, or embeddings.
+
+## Critical indexes and constraints
+
+- `room_members(room_id, active)`;
+- `room_member_embeddings(member_id)` and vector index only after measurement; filter by room first;
+- `photos(room_id, created_at desc)` and `photos(batch_id, processing_status)`;
+- `photo_user_matches(room_id, user_id, created_at desc)`;
+- partial job index on `status IN ('READY','RETRY') AND available_at <= now()`;
+- check constraints for nonnegative size, valid state values, and similarity range;
+- foreign keys prevent cross-room matches and orphaned jobs.
+
+For MVP rooms with hundreds of members, exact cosine search with `WHERE room_id = :roomId AND revoked_at IS NULL` is simpler. Add HNSW/IVFFlat only after measuring. Use `1 - (embedding <=> probe)` and a configurable threshold, defaulting to the product decision rather than hard-coding it in application code.
+
+## Queue transaction
+
+The finalize transaction must update the batch/photos and insert jobs/outbox records atomically. A worker claims with `FOR UPDATE SKIP LOCKED`, sets a lease, commits, then performs external work. A watchdog requeues expired `PROCESSING` jobs. Match upserts are idempotent and keep the greatest score.
+
+## Retention
+
+Define explicit retention for original objects, failed objects, face embeddings, matches, audit events, and signed URL lifetime. Room deletion must revoke access first, then delete matches/embeddings and enqueue private R2 deletion; do not rely on database deletion alone.

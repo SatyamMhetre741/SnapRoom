@@ -1,0 +1,60 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+ai-services/venv/
+
+# Python Cache & Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Local Testing / Data Directories
+sample_photos/
+output/
+**/sample_photos/
+**/output/
+
+# InsightFace / ML Model Caches
+models/
+.insightface/
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE & Editor Configs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backend (Java / Spring Boot)
+target/
+build/
+.gradle/
+*.class
+*.jar
+*.war
+
+# Frontend (Node / Next.js)
+node_modules/
+.next/
+out/
+.turbo/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
