@@ -4,6 +4,15 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+# Environment & Secrets
+.env
+.env.*
+application.yml
+application-*.yml
+src/main/resources/application.yml
+src/main/resources/application-*.yml
+!src/main/resources/application.yml.example
+
 ### STS ###
 .apt_generated
 .classpath

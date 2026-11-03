@@ -25,9 +25,17 @@ models/
 
 # Environment Variables & Secrets
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example
+
+# Application Configuration & Secrets
+application.yml
+application-*.yml
+**/src/main/resources/application.yml
+**/src/main/resources/application-*.yml
+!**/src/main/resources/application.yml.example
 
 # IDE & Editor Configs
 .idea/
