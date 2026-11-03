@@ -98,7 +98,7 @@ snaproom/
 ├── frontend/        → Next.js / React + TypeScript UI           (Port 3000)
 ├── backend/         → Java 21 + Spring Boot 3.x Core API        (Port 8080)
 ├── ai-services/     → Python 3.11 + FastAPI + InsightFace        (Port 8001)
-├── db/              → PostgreSQL 16 + pgvector migrations        (Port 5432)
+├── db/              → PostgreSQL 16 + pgvector migrations        (Port 5433)
 ├── infra/           → Docker Compose, deploy scripts, CORS config
 ├── docs/            → Architecture docs, API spec, setup guides
 ├── .env.example     → Environment variable template
@@ -171,7 +171,7 @@ docker compose -f infra/docker-compose.yml up -d --build
 This starts:
 | Service | URL | Description |
 |---|---|---|
-| PostgreSQL | `localhost:5432` | Database with pgvector extension |
+| PostgreSQL | `localhost:5433` | Database with pgvector extension |
 | AI Service | `localhost:8001` | InsightFace face extraction API |
 | Spring Boot | `localhost:8080` | Core REST API |
 

@@ -92,9 +92,10 @@ public class RoomController {
     @PostMapping("/{roomId}/presign-upload")
     public ResponseEntity<PresignUploadResponse> presignUpload(
             @PathVariable UUID roomId,
-            @Valid @RequestBody PresignUploadRequest request
+            @Valid @RequestBody PresignUploadRequest request,
+            @AuthenticationPrincipal UserPrincipal principal
     ) {
-        PresignUploadResponse response = roomService.createPresignedUploadUrl(roomId, request);
+        PresignUploadResponse response = roomService.createPresignedUploadUrl(roomId, request, principal.getId());
         return ResponseEntity.ok(response);
     }
 
@@ -143,8 +144,11 @@ public class RoomController {
      * GET /api/rooms/{roomId}/photos: Returns all event gallery photos with 1-hr presigned GET URLs.
      */
     @GetMapping("/{roomId}/photos")
-    public ResponseEntity<List<PhotoItemResponse>> getAllPhotos(@PathVariable UUID roomId) {
-        List<PhotoItemResponse> photos = roomService.getAllPhotos(roomId);
+    public ResponseEntity<List<PhotoItemResponse>> getAllPhotos(
+            @PathVariable UUID roomId,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        List<PhotoItemResponse> photos = roomService.getAllPhotos(roomId, principal.getId());
         return ResponseEntity.ok(photos);
     }
 
@@ -154,14 +158,15 @@ public class RoomController {
     @PostMapping("/{roomId}/download-zip")
     public ResponseEntity<StreamingResponseBody> downloadZip(
             @PathVariable UUID roomId,
-            @RequestBody DownloadZipRequest request
+            @RequestBody DownloadZipRequest request,
+            @AuthenticationPrincipal UserPrincipal principal
     ) {
         List<DownloadItemDto> items = (request != null && request.getItems() != null)
                 ? request.getItems()
                 : Collections.emptyList();
 
         StreamingResponseBody responseBody = outputStream -> {
-            roomService.streamZipArchive(roomId, items, outputStream);
+            roomService.streamZipArchive(roomId, items, principal.getId(), outputStream);
         };
 
         String filename = "snaproom-" + roomId + ".zip";

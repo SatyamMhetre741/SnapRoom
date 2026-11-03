@@ -25,9 +25,6 @@ public class StorageService {
     @Value("${storage.bucket-name:${r2.bucket-name:snaproom-photos}}")
     private String bucketName;
 
-    @Value("${storage.public-url:${r2.public-url:}}")
-    private String publicUrl;
-
     /**
      * Generates a presigned PUT URL for direct browser uploads to Cloudflare R2.
      */
@@ -49,16 +46,9 @@ public class StorageService {
     }
 
     /**
-     * Generates a view URL for Cloudflare R2.
-     * If a public CDN URL or custom domain is configured, returns direct public URL ($0 egress).
-     * Otherwise generates a 1-hour presigned GET URL via Cloudflare R2.
+     * Generates a short-lived private view URL for Cloudflare R2.
      */
     public String generatePresignedGetUrl(String objectKey, Duration expiration) {
-        if (publicUrl != null && !publicUrl.isBlank()) {
-            String baseUrl = publicUrl.endsWith("/") ? publicUrl.substring(0, publicUrl.length() - 1) : publicUrl;
-            return baseUrl + "/" + objectKey;
-        }
-
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(bucketName)
                 .key(objectKey)

@@ -9,10 +9,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
-import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -40,11 +38,11 @@ public class PhotoRoutingService {
         if (faces.isEmpty()) {
             throw new IllegalArgumentException("No face detected in selfie. Please ensure good lighting and face the camera directly.");
         }
+        if (faces.size() != 1) {
+            throw new IllegalArgumentException("Selfie must contain exactly one face.");
+        }
 
-        // Select the face with highest detection confidence
-        AiServiceClient.FaceDetail bestFace = faces.stream()
-                .max(Comparator.comparingDouble(AiServiceClient.FaceDetail::confidence))
-                .orElse(faces.get(0));
+        AiServiceClient.FaceDetail bestFace = faces.get(0);
 
         List<Float> embeddingList = bestFace.embedding();
         if (embeddingList == null || embeddingList.size() != 512) {
@@ -64,7 +62,6 @@ public class PhotoRoutingService {
      * and idempotently upserts matches into photo_user_matches.
      */
     @Async("photoTaskExecutor")
-    @Transactional
     public void processRoomPhotosAsync(UUID roomId, List<Photo> pendingPhotos) {
         log.info("Starting async face routing for {} photos in room {}", pendingPhotos.size(), roomId);
 

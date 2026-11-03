@@ -12,6 +12,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
@@ -25,6 +27,7 @@ import java.util.*;
 import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -70,6 +73,12 @@ public class RoomService {
 
         Room savedRoom = roomRepository.save(room);
 
+        roomMemberRepository.save(RoomMember.builder()
+                .room(savedRoom)
+                .user(leader)
+                .role("LEADER")
+                .build());
+
         return mapToRoomResponse(savedRoom, leaderId);
     }
 
@@ -78,6 +87,7 @@ public class RoomService {
                 .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
 
         validateRoomNotExpired(room);
+        requireMember(room, currentUserId);
         return mapToRoomResponse(room, currentUserId);
     }
 
@@ -134,10 +144,11 @@ public class RoomService {
         );
     }
 
-    public PresignUploadResponse createPresignedUploadUrl(UUID roomId, PresignUploadRequest request) {
+    public PresignUploadResponse createPresignedUploadUrl(UUID roomId, PresignUploadRequest request, UUID requestingUserId) {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
         validateRoomNotExpired(room);
+        requireLeader(room, requestingUserId);
 
         String rawFileName = request.getFileName() != null ? request.getFileName() : "photo.jpg";
         String sanitized = rawFileName.replaceAll("[^a-zA-Z0-9._-]", "_");
@@ -159,11 +170,16 @@ public class RoomService {
                 .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
         validateRoomNotExpired(room);
 
+        requireLeader(room, uploaderId);
+
         User uploader = uploaderId != null ? userRepository.findById(uploaderId).orElse(null) : null;
 
         List<Photo> createdPhotos = new ArrayList<>();
         for (String objectKey : objectKeys) {
             if (objectKey == null || objectKey.isBlank()) continue;
+            if (!objectKey.startsWith("rooms/" + roomId + "/")) {
+                throw new IllegalArgumentException("Every photo object must belong to the requested room.");
+            }
 
             Optional<Photo> existing = photoRepository.findByRoomIdAndObjectKey(roomId, objectKey);
             if (existing.isPresent()) {
@@ -189,8 +205,13 @@ public class RoomService {
             }
         }
 
-        // Trigger background processing asynchronously on photoTaskExecutor
-        photoRoutingService.processRoomPhotosAsync(roomId, createdPhotos);
+        // Do not let the worker race the transaction that registers the photos.
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                photoRoutingService.processRoomPhotosAsync(roomId, List.copyOf(createdPhotos));
+            }
+        });
 
         return createdPhotos;
     }
@@ -215,6 +236,7 @@ public class RoomService {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
         validateRoomNotExpired(room);
+        requireMember(room, userId);
 
         List<PhotoUserMatch> matches = photoUserMatchRepository.findByRoomIdAndUserIdOrderByCreatedAtDesc(roomId, userId);
 
@@ -236,10 +258,11 @@ public class RoomService {
         }).toList();
     }
 
-    public List<PhotoItemResponse> getAllPhotos(UUID roomId) {
+    public List<PhotoItemResponse> getAllPhotos(UUID roomId, UUID userId) {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
         validateRoomNotExpired(room);
+        requireMember(room, userId);
 
         List<Photo> photos = photoRepository.findByRoomIdOrderByCreatedAtDesc(roomId);
 
@@ -264,10 +287,15 @@ public class RoomService {
      * Streams S3 objects directly through a ZipOutputStream with Deflater.BEST_SPEED and 8KB buffer.
      * Never loads archives in memory.
      */
-    public void streamZipArchive(UUID roomId, List<DownloadItemDto> items, OutputStream outputStream) throws IOException {
+    public void streamZipArchive(UUID roomId, List<DownloadItemDto> items, UUID requestingUserId, OutputStream outputStream) throws IOException {
         Room room = roomRepository.findById(roomId)
                 .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
         validateRoomNotExpired(room);
+        requireMember(room, requestingUserId);
+
+        Set<String> roomObjectKeys = photoRepository.findByRoomId(roomId).stream()
+                .map(Photo::getObjectKey)
+                .collect(Collectors.toSet());
 
         try (ZipOutputStream zipOut = new ZipOutputStream(outputStream)) {
             zipOut.setLevel(Deflater.BEST_SPEED);
@@ -276,6 +304,10 @@ public class RoomService {
 
             for (DownloadItemDto item : items) {
                 if (item.objectKey() == null || item.objectKey().isBlank()) continue;
+                if (!roomObjectKeys.contains(item.objectKey())) {
+                    log.warn("Ignoring download request for object outside room {}: {}", roomId, item.objectKey());
+                    continue;
+                }
 
                 String baseName = item.fileName() != null && !item.fileName().isBlank()
                         ? item.fileName()
@@ -332,6 +364,19 @@ public class RoomService {
     private void validateRoomNotExpired(Room room) {
         if (room.getExpiresAt() != null && room.getExpiresAt().isBefore(Instant.now())) {
             throw new IllegalStateException("Room '" + room.getName() + "' has expired and is scheduled for deletion.");
+        }
+    }
+
+    private void requireLeader(Room room, UUID userId) {
+        if (userId == null || !room.getLeader().getId().equals(userId)) {
+            throw new org.springframework.security.access.AccessDeniedException("Only the room leader can upload photos.");
+        }
+    }
+
+    private void requireMember(Room room, UUID userId) {
+        if (userId == null || (!room.getLeader().getId().equals(userId)
+                && !roomMemberRepository.existsByRoomIdAndUserId(room.getId(), userId))) {
+            throw new org.springframework.security.access.AccessDeniedException("You are not a member of this room.");
         }
     }
 
