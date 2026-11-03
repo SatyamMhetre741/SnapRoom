@@ -1,7 +1,7 @@
 -- ==============================================================================
 -- Migration: V1__initial_schema.sql
 -- Description: SnapRoom PostgreSQL 16 + pgvector schema definition
--- Complies with: db/CONTEXT.md and root CONTEXT.md
+-- Complies with: db/CONTEXT.md, root CONTEXT.md, and SnapRoom backend entities
 -- ==============================================================================
 
 -- 1. EXTENSIONS
@@ -23,15 +23,35 @@ $$ LANGUAGE plpgsql;
 -- ==============================================================================
 
 -- Table 1: users
--- Identity and account timestamps
+-- Identity, authentication and account timestamps
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) UNIQUE,
+    email VARCHAR(255) UNIQUE NOT NULL,
     name VARCHAR(255) NOT NULL,
+    display_name VARCHAR(255) NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
     avatar_url VARCHAR(512),
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
+
+CREATE OR REPLACE FUNCTION sync_user_fields()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.display_name IS NULL OR NEW.display_name = '' THEN
+        NEW.display_name = NEW.name;
+    END IF;
+    IF NEW.name IS NULL OR NEW.name = '' THEN
+        NEW.name = NEW.display_name;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_users_sync_fields
+    BEFORE INSERT OR UPDATE ON users
+    FOR EACH ROW
+    EXECUTE FUNCTION sync_user_fields();
 
 CREATE TRIGGER trg_users_updated_at
     BEFORE UPDATE ON users
@@ -39,7 +59,7 @@ CREATE TRIGGER trg_users_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Table 2: rooms
--- Name, invite code, leader, lifecycle, model version and similarity threshold
+-- Name, invite code, leader, lifecycle, model version, similarity threshold, expiration
 CREATE TABLE rooms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -48,6 +68,7 @@ CREATE TABLE rooms (
     status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE', 'ARCHIVED', 'DELETED')),
     model_version VARCHAR(64) NOT NULL DEFAULT 'buffalo_l',
     similarity_threshold NUMERIC(4,3) NOT NULL DEFAULT 0.500 CHECK (similarity_threshold >= 0.0 AND similarity_threshold <= 1.0),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT (clock_timestamp() + INTERVAL '2 days'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
@@ -58,13 +79,15 @@ CREATE TRIGGER trg_rooms_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Table 3: room_members
--- Room/user/role, active state, joined timestamps; unique (room_id, user_id)
+-- Room/user/role, active state, facial embedding, joined timestamps; unique (room_id, user_id)
 CREATE TABLE room_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(32) NOT NULL DEFAULT 'MEMBER' CHECK (role IN ('LEADER', 'MEMBER', 'GUEST', 'UPLOADER')),
     active BOOLEAN NOT NULL DEFAULT true,
+    embedding vector(512) NULL,
+    enrolled_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     joined_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     CONSTRAINT uq_room_members_room_user UNIQUE (room_id, user_id)
@@ -87,6 +110,25 @@ CREATE TABLE room_member_embeddings (
     revoked_at TIMESTAMPTZ NULL,
     CONSTRAINT uq_room_member_embeddings_member UNIQUE (member_id)
 );
+
+-- Trigger to keep room_member_embeddings in sync with room_members.embedding
+CREATE OR REPLACE FUNCTION sync_room_member_embedding()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.embedding IS NOT NULL THEN
+        INSERT INTO room_member_embeddings (member_id, embedding, enrolled_at)
+        VALUES (NEW.id, NEW.embedding, NEW.enrolled_at)
+        ON CONFLICT (member_id)
+        DO UPDATE SET embedding = EXCLUDED.embedding, enrolled_at = EXCLUDED.enrolled_at, revoked_at = NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_sync_room_member_embedding
+    AFTER INSERT OR UPDATE OF embedding ON room_members
+    FOR EACH ROW
+    EXECUTE FUNCTION sync_room_member_embedding();
 
 -- Table 5: upload_batches
 -- Upload batch tracker: room, uploader, client batch id, counts, state
@@ -115,14 +157,16 @@ CREATE TRIGGER trg_upload_batches_updated_at
 CREATE TABLE photos (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     room_id UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    batch_id UUID NOT NULL REFERENCES upload_batches(id) ON DELETE CASCADE,
-    uploader_id UUID NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    client_photo_id VARCHAR(128) NOT NULL,
+    batch_id UUID NULL REFERENCES upload_batches(id) ON DELETE CASCADE,
+    uploader_id UUID NULL REFERENCES users(id) ON DELETE RESTRICT,
+    client_photo_id VARCHAR(128) NULL,
     object_key VARCHAR(512) NOT NULL,
     original_filename VARCHAR(255) NOT NULL,
-    mime_type VARCHAR(128) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(128) NULL DEFAULT 'image/jpeg',
     bytes BIGINT NOT NULL DEFAULT 0 CHECK (bytes >= 0),
     checksum_etag VARCHAR(128) NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
     processing_status VARCHAR(32) NOT NULL DEFAULT 'AWAITING_UPLOAD' CHECK (processing_status IN (
         'AWAITING_UPLOAD', 'UPLOADED', 'QUEUED', 'PROCESSING', 'PROCESSED', 'NO_MATCHES', 'FAILED'
     )),
@@ -133,9 +177,37 @@ CREATE TABLE photos (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     CONSTRAINT uq_photos_batch_client_photo UNIQUE (batch_id, client_photo_id),
     CONSTRAINT uq_photos_room_object_key UNIQUE (room_id, object_key),
-    -- Required to support composite foreign key on (photo_id, room_id) in matches table
     CONSTRAINT uq_photos_id_room UNIQUE (id, room_id)
 );
+
+CREATE OR REPLACE FUNCTION sync_photo_fields()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.file_name IS NULL OR NEW.file_name = '' THEN
+        NEW.file_name = NEW.original_filename;
+    END IF;
+    IF NEW.original_filename IS NULL OR NEW.original_filename = '' THEN
+        NEW.original_filename = NEW.file_name;
+    END IF;
+    IF NEW.status = 'PENDING' AND NEW.processing_status != 'AWAITING_UPLOAD' THEN
+        NEW.status = NEW.processing_status;
+    ELSIF NEW.status != 'PENDING' AND NEW.processing_status = 'AWAITING_UPLOAD' THEN
+        IF NEW.status = 'PROCESSING' THEN
+            NEW.processing_status = 'PROCESSING';
+        ELSIF NEW.status = 'COMPLETED' THEN
+            NEW.processing_status = 'PROCESSED';
+        ELSIF NEW.status = 'FAILED' THEN
+            NEW.processing_status = 'FAILED';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_photos_sync_fields
+    BEFORE INSERT OR UPDATE ON photos
+    FOR EACH ROW
+    EXECUTE FUNCTION sync_photo_fields();
 
 CREATE TRIGGER trg_photos_updated_at
     BEFORE UPDATE ON photos
@@ -158,22 +230,37 @@ CREATE TABLE photo_faces (
 
 -- Table 8: photo_user_matches
 -- Match results powering "My Pics": photo, room, user, best similarity
--- Foreign keys enforce room security boundary: match cannot cross rooms
 CREATE TABLE photo_user_matches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     photo_id UUID NOT NULL,
     room_id UUID NOT NULL,
     user_id UUID NOT NULL,
-    best_similarity NUMERIC(5,4) NOT NULL CHECK (best_similarity >= 0.0 AND best_similarity <= 1.0),
+    similarity_score REAL NOT NULL DEFAULT 0.0,
+    best_similarity NUMERIC(5,4) NOT NULL DEFAULT 0.0 CHECK (best_similarity >= 0.0 AND best_similarity <= 1.0),
     model_version VARCHAR(64) NOT NULL DEFAULT 'buffalo_l',
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     CONSTRAINT uq_photo_user_matches_photo_user UNIQUE (photo_id, user_id),
-    -- Enforce that photo belongs to room
     CONSTRAINT fk_photo_user_matches_photo_room FOREIGN KEY (photo_id, room_id) REFERENCES photos(id, room_id) ON DELETE CASCADE,
-    -- Enforce that user belongs to room
     CONSTRAINT fk_photo_user_matches_room_member FOREIGN KEY (room_id, user_id) REFERENCES room_members(room_id, user_id) ON DELETE CASCADE
 );
+
+CREATE OR REPLACE FUNCTION sync_match_similarity()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.best_similarity = 0.0 AND NEW.similarity_score > 0.0 THEN
+        NEW.best_similarity = LEAST(1.0, GREATEST(0.0, ROUND(NEW.similarity_score::numeric, 4)));
+    ELSIF NEW.similarity_score = 0.0 AND NEW.best_similarity > 0.0 THEN
+        NEW.similarity_score = NEW.best_similarity::real;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_match_sync_similarity
+    BEFORE INSERT OR UPDATE ON photo_user_matches
+    FOR EACH ROW
+    EXECUTE FUNCTION sync_match_similarity();
 
 CREATE TRIGGER trg_photo_user_matches_updated_at
     BEFORE UPDATE ON photo_user_matches
