@@ -1,41 +1,41 @@
 # Backend Agent Context (`backend/`)
 
-## 1. Tech Stack & Role
-- **Language & Framework:** Java 21 + Spring Boot 3.x (`spring-boot-starter-web`, `spring-boot-starter-data-jpa`, `spring-boot-starter-security`).
-- **Database & Vector Mapping:** PostgreSQL 16 + `pgvector` mapped via `org.hibernate.orm:hibernate-vector` (`@JdbcTypeCode(SqlTypes.VECTOR)` and `@Array(length = 512)`).
-- **Object Storage SDK:** AWS SDK for Java v2 (`software.amazon.awssdk:s3`) configured for Cloudflare R2, AWS S3, or MinIO.
-- **Internal AI HTTP Client:** Spring Framework 6.1 synchronous `RestClient` calling the Python FastAPI service.
+## Role
 
-## 2. Package & Directory Responsibilities
-- `src/main/java/com/snaproom/config/`
-  - `AsyncConfig.java`: Annotated with `@Configuration` and `@EnableAsync`. Defines a `@Bean(name = "photoTaskExecutor")` `ThreadPoolTaskExecutor` (`corePoolSize=2`, `maxPoolSize=4`, `queueCapacity=500`, prefix `"PhotoWorker-"`) and the `RestClient` bean pointing to `${ai.service.url}`.
-  - `S3Config.java`: Configures `S3Client` and `S3Presigner` beans with custom endpoint override support for Cloudflare R2 / MinIO.
-  - `SecurityConfig.java`: Configures stateless JWT authentication filter, public auth endpoints, and CORS for the frontend origin.
-- `src/main/java/com/snaproom/controller/`
-  - `RoomController.java`:
-    - `POST /api/rooms`: Creates a room, generates a unique `inviteCode`, assigns creator as `LEADER`.
-    - `POST /api/rooms/{inviteCode}/enroll`: Accepts `MultipartFile` selfie, extracts a single 512-D `float[]` vector via `PhotoRoutingService.extractSingleFaceForEnrollment(...)`, saves `RoomMember`, and discards the image bytes.
-    - `POST /api/rooms/{roomId}/presign-upload`: Uses `S3Presigner` to return a 5-minute presigned `PUT` URL and `objectKey` (`rooms/{roomId}/{uuid}-{fileName}`).
-    - `POST /api/rooms/{roomId}/process-photos`: Registers uploaded photo keys as `PENDING`, triggers `photoRoutingService.processRoomPhotosAsync(...)`, and immediately returns `202 Accepted`.
-    - `GET /api/rooms/{roomId}/photos/me`: Returns matched photos for the authenticated user with 1-hour presigned `GET` URLs.
-    - `GET /api/rooms/{roomId}/photos`: Returns all room photos with 1-hour presigned `GET` URLs.
-    - `POST /api/rooms/{roomId}/download-zip`: Returns `ResponseEntity<StreamingResponseBody>` with `Content-Type: application/zip`, streaming objects from `s3Client.getObject(...)` through a `ZipOutputStream` (`Deflater.BEST_SPEED`, 8 KB buffer).
-- `src/main/java/com/snaproom/service/`
-  - `PhotoRoutingService.java`:
-    - `extractSingleFaceForEnrollment(byte[] selfieBytes, String fileName)`: Calls Python `/extract-faces` synchronously; throws `IllegalArgumentException` if no face is detected.
-    - `@Async("photoTaskExecutor") processRoomPhotosAsync(UUID roomId, List<Photo> pendingPhotos)`: Iterates through photos, fetches image bytes from S3/R2, posts to `/extract-faces` via `RestClient` and `MultipartBodyBuilder`, formats each `float[]` via `Arrays.toString(...)`, runs `memberRepository.findMatchingMembersInRoom(roomId, vectorLiteral, 0.50)`, upserts into `photo_user_matches`, and updates photo `status` to `COMPLETED` or `FAILED`.
-- `src/main/java/com/snaproom/entity/`
-  - `User.java`, `Room.java`, `RoomMember.java`, `Photo.java`, `PhotoUserMatch.java`.
-  - In `RoomMember.java`, annotate `private float[] embedding;` with `@JdbcTypeCode(SqlTypes.VECTOR)`, `@Array(length = 512)`, and `@Column(name = "embedding", nullable = false, columnDefinition = "vector(512)")`.
-- `src/main/java/com/snaproom/repository/`
-  - `RoomMemberRepository.java`: Includes native query `findMatchingMembersInRoom` using `1 - (embedding <=> CAST(:probeVector AS vector)) >= :threshold`.
-  - `PhotoRepository.java`, `PhotoUserMatchRepository.java`, `RoomRepository.java`, `UserRepository.java`.
-- `src/main/resources/`
-  - `application.yml`: Configures PostgreSQL datasource, `spring.servlet.multipart.max-file-size: 15MB`, S3/R2 bucket settings, and AI service base URL.
-- `src/test/` — JUnit 5 + MockMvc tests mocking `RestClient` and `S3Client`.
-- `pom.xml` — Java 21, Spring Boot 3.x parent, `hibernate-vector`, `postgresql`, `software.amazon.awssdk:s3`.
+Java 21 + Spring Boot 3.x owns authorization, transactions, R2 access, the internal AI call, the durable queue worker, and all gallery/download responses.
 
-## 3. Critical Spring Boot Pitfalls to Avoid
-1. **`@Async` Self-Invocation:** Never call `@Async processRoomPhotosAsync(...)` from another method inside `PhotoRoutingService`—it must be invoked from `RoomController` (or an external bean) so Spring's proxy intercepts the call and runs it on `photoTaskExecutor`.
-2. **Filename Required on `MultipartBodyBuilder`:** When sending `byte[]` via `RestClient` to FastAPI's `UploadFile`, wrap the bytes in a `ByteArrayResource` that overrides `getFilename()` to return a non-null string (e.g., `"image.jpg"`), otherwise FastAPI rejects the multipart part.
-3. **Never Load ZIP Archives in Memory:** Always stream `ResponseInputStream<GetObjectResponse>` chunks directly into `ZipOutputStream` inside `StreamingResponseBody`.
+## Request ordering
+
+- `POST /api/rooms/{roomId}/upload-batches`: authorize uploader; create `upload_batches` and `photos` in `AWAITING_UPLOAD`; return presigned PUT URLs and opaque object keys.
+- `POST /api/photos/{photoId}/complete-upload`: authorize batch owner; verify object key and optionally R2 HEAD/checksum; transition to `UPLOADED` idempotently.
+- `POST /api/upload-batches/{batchId}/finalize`: lock batch, verify all expected uploads, transition photos to `QUEUED`, insert unique processing jobs/outbox events, commit, return `202`.
+- Worker: claim one job with `FOR UPDATE SKIP LOCKED`; commit lease; fetch R2; call AI; commit detections/matches/status in a separate short transaction.
+- `GET /api/upload-batches/{batchId}/status`: return authoritative counts and failed item codes.
+- `GET /api/rooms/{roomId}/photos`: authorized all-room gallery; issue short-lived signed GET URLs for uploaded/terminal photos.
+- `GET /api/rooms/{roomId}/photos/me`: authorized My Pics query joining `photo_user_matches`; only return matches whose photo processing transaction committed.
+
+## Components
+
+Use separate services/classes for `UploadBatchService`, `StorageService`, `PhotoProcessingJobService`, `PhotoWorker`, `AiClient`, `PhotoMatchService`, and `GalleryService`. Spring `@Async` alone is not the durable queue: a process restart would lose in-memory work. If a local executor is used to poll Postgres jobs, it is only a delivery mechanism around durable rows.
+
+The worker must not hold a DB transaction while fetching R2 or calling AI. Claim/lease, external work, and final persistence are separate phases. Use a watchdog for expired leases and exponential backoff for retryable failures.
+
+## R2 rules
+
+Use AWS SDK v2 `S3Presigner` for private presigned PUT/GET URLs. Persist `bucket`, `object_key`, content type, size, checksum/ETag, and upload timestamps. Do not persist a presigned URL; it expires. Use an object key scoped by room and photo id. The backend, not the browser, fetches the source object for AI.
+
+## AI rules
+
+POST the fetched bytes as multipart to internal FastAPI `/extract-faces`; include a filename. Validate response shape, model version, face confidence, and 512-D normalized vectors. Restrict matching by room id and active memberships. Do not send user ids to AI.
+
+## Transaction and idempotency rules
+
+- Unique keys: batch client id, photo `(batch_id, client_photo_id)`, job `(photo_id, operation, model_version)`, and match `(photo_id, user_id)`.
+- `complete-upload`, `finalize`, job retry, and match writes are safe to repeat.
+- Match upsert keeps the highest score for the same photo version.
+- Map failures to safe error codes; never return stack traces, vectors, R2 credentials, or internal URLs.
+- Enforce room membership/role on every endpoint, including signed URL generation and retry.
+
+## Avoid
+
+Do not rely on `@Async` self-invocation, do not process the whole batch in an HTTP request, do not make R2 public, and do not query My Pics from a client-supplied username or room id without authorization.

@@ -1,24 +1,27 @@
 # Infrastructure Agent Context (`infra/`)
 
-## 1. Tech Stack & Role
-- **Container Orchestration:** Docker & Docker Compose v2.
-- **Object Storage:** Cloudflare R2 (production/staging for `$0.00/GB` egress) or MinIO (optional local offline S3 emulator).
-- **Deployment Target:** Single 4 GB RAM Linux VPS (Hetzner, DigitalOcean, or Render) for backend + AI + Postgres, and Vercel for the Next.js frontend.
+## Runtime topology
 
-## 2. Directory Responsibilities
-- `docker-compose.yml` — Local development stack:
-  - `postgres`: Image `pgvector/pgvector:pg16`, mounts `../database/migrations` to `/docker-entrypoint-initdb.d/`, exposes port `5432`, persists volume `pgdata`.
-  - `ai-service`: Builds `../ai-service`, exposes port `8001`, caches InsightFace models in a named volume `insightface_cache:/root/.insightface` so `buffalo_l` is not re-downloaded on container rebuilds.
-  - `spring-backend`: Builds `../backend`, exposes port `8080`, injects database and R2/S3 environment variables, depends on `postgres` and `ai-service`.
-- `docker-compose.prod.yml` — Production overrides:
-  - Adds `restart: unless-stopped` to all services.
-  - Removes host port bindings for `postgres` (`5432`) and `ai-service` (`8001`) so only `spring-backend` (`8080`) or a reverse proxy is reachable outside the Docker network.
-- `storage/` — Object storage documentation & policies:
-  - `cors-policy.json`: Required CORS configuration for Cloudflare R2 / AWS S3 allowing `PUT` and `GET` from the frontend origin with `Content-Type` and `ETag` headers exposed so browser presigned uploads succeed.
-  - `r2-setup.md`: Step-by-step instructions to create a private R2 bucket (`snaproom-photos`) and generate S3 API tokens.
-- `deployment/` — Automation scripts:
-  - `deploy.sh`: Pulls latest git changes, runs `docker compose -f infra/docker-compose.yml -f infra/docker-compose.prod.yml up -d --build`, and prunes dangling images.
+Frontend can run on Vercel or another edge host. The backend API, a worker process, AI service, and Postgres run in a private network. Cloudflare R2 is private and accessed with S3-compatible credentials held only by backend/worker. AI and Postgres have no public ingress.
 
-## 3. Infrastructure Rules
-1. **Never Expose `ai-service` Publicly in Production:** The Python `/extract-faces` service has no authentication layer and must only be reachable by `spring-backend` over the internal Docker bridge network (`http://ai-service:8001`).
-2. **Persist Model Weights Volume:** Always mount a persistent volume to `/root/.insightface` on `ai-service` so container restarts start in seconds without downloading the ~300 MB `buffalo_l` ONNX weights again.
+For the MVP, the worker polls `photo_processing_jobs` in Postgres. It may be a separate backend worker container or a bounded worker mode in the backend deployment. Keep the worker stateless; all work state lives in Postgres. When throughput requires it, publish outbox events to Cloudflare Queues/SQS/RabbitMQ while keeping the DB job row and idempotency key.
+
+## Deployment requirements
+
+- private R2 bucket and least-privilege access keys;
+- TLS at the public API and strict CORS for the frontend origin;
+- private network policy from backend/worker to AI and Postgres only;
+- persistent Postgres volume and pgvector image;
+- health/readiness checks for API, worker, AI model readiness, and database;
+- secrets through environment/secret manager, never committed;
+- structured metrics for upload completion, queue depth/age, processing latency, AI errors, retries, match count, and failed photos.
+
+Do not expose the AI port, Postgres port, R2 secret, or presigned upload-generation endpoint without JWT/room authorization. Configure R2 CORS only for the frontend origin and required `PUT` headers; CORS does not make the bucket public.
+
+## Reliability operations
+
+Run migrations before workers. Start workers only after Postgres and AI readiness. Support graceful shutdown: stop claiming new jobs, finish or release leases, then exit. Alert on queue age, repeated failures, expired leases, and R2/AI latency. Keep a replay/retry command that only requeues authorized failed photo ids.
+
+## Scaling path
+
+First scale worker count within CPU/RAM limits and tune inference concurrency. Later separate API and worker autoscaling and replace polling delivery with a managed queue. The Postgres job row remains authoritative for status and idempotency.
