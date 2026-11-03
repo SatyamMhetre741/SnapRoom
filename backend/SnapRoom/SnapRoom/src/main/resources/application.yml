@@ -37,6 +37,9 @@ storage:
   bucket-name: ${STORAGE_BUCKET_NAME:${R2_BUCKET_NAME:snaproom-photos}}
   access-key-id: ${R2_ACCESS_KEY_ID:${AWS_ACCESS_KEY_ID:test}}
   secret-access-key: ${R2_SECRET_ACCESS_KEY:${AWS_SECRET_ACCESS_KEY:test}}
+  public-url: ${R2_PUBLIC_URL:}
+
+
 room:
   ttl-days: ${ROOM_TTL_DAYS:2}
   cleanup:
