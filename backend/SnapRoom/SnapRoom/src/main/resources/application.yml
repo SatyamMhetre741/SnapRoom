@@ -5,13 +5,13 @@ spring:
   application:
     name: SnapRoom
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/snaproom}
-    username: ${SPRING_DATASOURCE_USERNAME:snaproom}
-    password: ${SPRING_DATASOURCE_PASSWORD:secretpassword}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5433/photo_sharing_db}
+    username: ${SPRING_DATASOURCE_USERNAME:postgres}
+    password: ${SPRING_DATASOURCE_PASSWORD:MyNewPassword123}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:none}
     open-in-view: false
     properties:
       hibernate:
@@ -31,14 +31,13 @@ ai:
     url: ${AI_SERVICE_URL:http://localhost:8001}
 
 storage:
-  endpoint: ${STORAGE_ENDPOINT:${R2_ENDPOINT:}}
+  endpoint: ${STORAGE_ENDPOINT:${R2_ENDPOINT:https://dummy.r2.cloudflarestorage.com}}
   account-id: ${R2_ACCOUNT_ID:}
   region: ${STORAGE_REGION:${R2_REGION:auto}}
   bucket-name: ${STORAGE_BUCKET_NAME:${R2_BUCKET_NAME:snaproom-photos}}
   access-key-id: ${R2_ACCESS_KEY_ID:${AWS_ACCESS_KEY_ID:test}}
   secret-access-key: ${R2_SECRET_ACCESS_KEY:${AWS_SECRET_ACCESS_KEY:test}}
   public-url: ${R2_PUBLIC_URL:}
-
 
 room:
   ttl-days: ${ROOM_TTL_DAYS:2}
