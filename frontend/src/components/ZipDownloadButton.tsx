@@ -35,22 +35,20 @@ export const ZipDownloadButton: React.FC<ZipDownloadButtonProps> = ({
     try {
       const zipBlob = await roomService.downloadZip(roomId, selectedItems);
 
-      // Trigger native browser download via temporary object URL
       const downloadUrl = window.URL.createObjectURL(zipBlob);
       const link = document.createElement('a');
       link.href = downloadUrl;
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      link.download = `SnapRoom_Photos_${timestamp}.zip`;
+      link.download = `SendMyPics_${timestamp}.zip`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(downloadUrl);
 
-      // Trigger celebration confetti
       try {
         confetti({
-          particleCount: 80,
-          spread: 60,
+          particleCount: 60,
+          spread: 55,
           origin: { y: 0.8 },
         });
       } catch {
@@ -65,8 +63,8 @@ export const ZipDownloadButton: React.FC<ZipDownloadButtonProps> = ({
       if (onDownloadComplete) {
         onDownloadComplete();
       }
-    } catch (err: any) {
-      alert(`Download failed: ${err.message || 'Unable to download ZIP archive.'}`);
+    } catch (err: unknown) {
+      alert(`Download failed: ${(err as Error).message || 'Unable to download ZIP archive.'}`);
     } finally {
       setIsDownloading(false);
     }
@@ -75,12 +73,12 @@ export const ZipDownloadButton: React.FC<ZipDownloadButtonProps> = ({
   const getButtonStyles = () => {
     switch (variant) {
       case 'floating':
-        return 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-xl shadow-teal-500/25 hover:from-emerald-400 hover:to-cyan-400';
+        return 'bg-[#ff4d2d] text-white hover:bg-[#e03e1e] shadow-lg';
       case 'secondary':
-        return 'bg-white/10 hover:bg-white/15 text-slate-200 border border-white/10';
+        return 'bg-[#1a1e27] hover:bg-[#222834] text-slate-200 border border-white/[0.1]';
       case 'primary':
       default:
-        return 'bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-500/25 hover:from-indigo-400 hover:to-purple-500';
+        return 'bg-[#ff4d2d] text-white hover:bg-[#e03e1e]';
     }
   };
 
@@ -88,26 +86,26 @@ export const ZipDownloadButton: React.FC<ZipDownloadButtonProps> = ({
     <button
       onClick={handleDownload}
       disabled={selectedItems.length === 0 || isDownloading}
-      className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-xs font-semibold transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${getButtonStyles()} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${getButtonStyles()} ${className}`}
       title={
         selectedItems.length === 0
           ? 'Select at least one photo to download'
-          : `Download ${selectedItems.length} photos as ZIP`
+          : `Download ${selectedItems.length} photo(s) as ZIP`
       }
     >
       {isDownloading ? (
         <>
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <span>Generating ZIP...</span>
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <span>Creating ZIP...</span>
         </>
       ) : downloadSuccess ? (
         <>
-          <Check className="h-4 w-4 text-emerald-300" />
-          <span>Downloaded!</span>
+          <Check className="h-3.5 w-3.5 text-white" />
+          <span>Downloaded</span>
         </>
       ) : (
         <>
-          <Download className="h-4 w-4" />
+          <Download className="h-3.5 w-3.5" />
           <span>
             {customLabel ||
               `Download ZIP ${selectedItems.length > 0 ? `(${selectedItems.length})` : ''}`}

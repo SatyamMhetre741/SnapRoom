@@ -149,9 +149,9 @@ export const uploadService = {
           progressItem.status = 'done';
           progressItem.progress = 100;
           updateUI();
-        } catch (err: any) {
+        } catch (err: unknown) {
           progressItem.status = 'error';
-          progressItem.error = err.message || 'Upload failed';
+          progressItem.error = (err as Error).message || 'Upload failed';
           updateUI();
         }
       }

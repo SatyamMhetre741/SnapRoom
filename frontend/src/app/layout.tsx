@@ -1,21 +1,10 @@
 import type { Metadata } from 'next';
-import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 
-const geistSans = Geist({
-  variable: '--font-geist-sans',
-  subsets: ['latin'],
-});
-
-const geistMono = Geist_Mono({
-  variable: '--font-geist-mono',
-  subsets: ['latin'],
-});
-
 export const metadata: Metadata = {
-  title: 'SnapRoom — Intelligent Facial-Routing Event Photo Sharing',
+  title: 'SendMyPics — Event Photo Sharing Powered by Instant Face Matching',
   description:
-    'Instantly find and download all photos of you from any event or party using private, client-side webcam facial vector routing and streaming ZIP downloads.',
+    'Effortlessly collect and distribute event photos. Guests take a quick selfie to automatically find and download all their pictures in full resolution.',
 };
 
 export default function RootLayout({
@@ -24,11 +13,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
-    >
-      <body className="min-h-full flex flex-col bg-[#090a10] text-slate-100 selection:bg-indigo-500 selection:text-white">
+    <html lang="en" className="dark h-full antialiased">
+      <body className="min-h-full flex flex-col bg-[#0d0f12] text-slate-100 selection:bg-amber-500/30 selection:text-white">
         {children}
       </body>
     </html>

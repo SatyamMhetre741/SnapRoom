@@ -21,9 +21,9 @@ export const removeAuthToken = (): void => {
 
 export class ApiError extends Error {
   status: number;
-  data: any;
+  data: unknown;
 
-  constructor(message: string, status: number, data?: any) {
+  constructor(message: string, status: number, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
@@ -76,7 +76,7 @@ export async function apiRequest<T>(
     });
 
     if (!response.ok) {
-      let errorData: any = null;
+      let errorData: unknown = null;
       try {
         errorData = await response.json();
       } catch {
@@ -87,9 +87,10 @@ export async function apiRequest<T>(
         }
       }
 
+      const parsedError = errorData as Record<string, unknown> | string | null;
       const message =
-        (typeof errorData === 'object' && (errorData?.message || errorData?.error)) ||
-        (typeof errorData === 'string' && errorData) ||
+        (typeof parsedError === 'object' && parsedError !== null && ((parsedError.message as string) || (parsedError.error as string))) ||
+        (typeof parsedError === 'string' && parsedError) ||
         `Request failed with status ${response.status}`;
 
       throw new ApiError(message, response.status, errorData);
