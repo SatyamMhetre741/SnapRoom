@@ -15,11 +15,18 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
 
   ai-service:
-    build: ./ai-service
+    build: ./ai-services
     container_name: snaproom-ai
     ports:
       - "8001:8001"
     command: uvicorn main:app --host 0.0.0.0 --port 8001
+    volumes:
+      - insightface_cache:/root/.insightface
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   spring-backend:
     build: ./backend
@@ -39,3 +46,4 @@ services:
 
 volumes:
   pgdata:
+  insightface_cache:
