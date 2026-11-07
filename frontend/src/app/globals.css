@@ -1,0 +1,111 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --canvas: #0b0c0e;
+    --surface: #13161c;
+    --surface-elevated: #1a1e27;
+    --border-machined: rgba(255, 255, 255, 0.08);
+    --border-focus: rgba(255, 77, 45, 0.4);
+    --shutter-accent: #ff4d2d;
+    --lens-cyan: #38bdf8;
+    --foreground: #f8fafc;
+    --foreground-muted: #94a3b8;
+  }
+
+  body {
+    background-color: var(--canvas);
+    color: var(--foreground);
+    min-height: 100vh;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    overflow-x: hidden;
+    letter-spacing: -0.011em;
+  }
+}
+
+/* Precision optical viewfinder guide */
+@keyframes viewfinder-pulse {
+  0%, 100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+.viewfinder-reticle {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-color: #38bdf8;
+  pointer-events: none;
+}
+
+.viewfinder-tl {
+  top: 16px;
+  left: 16px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.viewfinder-tr {
+  top: 16px;
+  right: 16px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+}
+
+.viewfinder-bl {
+  bottom: 16px;
+  left: 16px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+}
+
+.viewfinder-br {
+  bottom: 16px;
+  right: 16px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+
+/* Focal scan indicator */
+@keyframes focal-sweep {
+  0% {
+    top: 15%;
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    top: 85%;
+    opacity: 0.2;
+  }
+}
+
+.focal-scan-line {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  height: 1.5px;
+  background: linear-gradient(90deg, transparent, #38bdf8, #f8fafc, #38bdf8, transparent);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+  animation: focal-sweep 3s ease-in-out infinite alternate;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0c0e;
+}
+::-webkit-scrollbar-thumb {
+  background: #262c37;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b4353;
+}
