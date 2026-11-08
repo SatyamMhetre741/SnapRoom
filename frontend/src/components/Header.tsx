@@ -12,6 +12,7 @@ interface HeaderProps {
   onOpenInvite?: () => void;
   onOpenUpload?: () => void;
   onLogout?: () => void;
+  onOpenAuth?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenInvite,
   onOpenUpload,
   onLogout,
+  onOpenAuth,
 }) => {
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#0b0c0e]/90 backdrop-blur-md">
@@ -105,12 +107,12 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </div>
           ) : (
-            <Link
-              href="/"
+            <button
+              onClick={onOpenAuth}
               className="text-xs font-medium text-slate-300 hover:text-white transition-colors"
             >
               Sign in
-            </Link>
+            </button>
           )}
         </div>
       </div>

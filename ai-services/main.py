@@ -1,6 +1,14 @@
+import os
 import logging
 from contextlib import asynccontextmanager
 from typing import List
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, status
 from pydantic import BaseModel, Field
 

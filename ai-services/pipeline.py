@@ -1,3 +1,4 @@
+import os
 import logging
 from typing import List, Optional, Dict, Any
 import cv2
@@ -6,11 +7,11 @@ from insightface.app import FaceAnalysis
 
 logger = logging.getLogger(__name__)
 
-# Constants
-MODEL_NAME = "buffalo_l"
-EXECUTION_PROVIDER = "CPUExecutionProvider"
+# Constants & environment configuration
+MODEL_NAME = os.getenv("INSIGHTFACE_MODEL", "buffalo_l")
+EXECUTION_PROVIDER = os.getenv("EXECUTION_PROVIDER", "CPUExecutionProvider")
 DET_SIZE = (640, 640)
-DET_THRESH = 0.5
+DET_THRESH = float(os.getenv("DET_THRESH", "0.5"))
 
 
 def init_face_app() -> FaceAnalysis:

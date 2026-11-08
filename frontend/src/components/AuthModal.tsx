@@ -8,7 +8,7 @@ import { User } from '../types';
 interface AuthModalProps {
   onSuccess: (user: User) => void;
   onClose: () => void;
-  initialMode?: 'login' | 'register' | 'guest';
+  initialMode?: 'login' | 'register';
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -16,7 +16,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onClose,
   initialMode = 'login',
 }) => {
-  const [mode, setMode] = useState<'login' | 'register' | 'guest'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [password, setPassword] = useState('');
@@ -29,10 +29,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setErrorMsg(null);
 
     try {
-      if (mode === 'guest') {
-        const user = authService.getOrCreateGuestUser(displayName || 'Guest Attendee');
-        onSuccess(user);
-      } else if (mode === 'login') {
+      if (mode === 'login') {
         const res = await authService.login(email, password);
         onSuccess(res.user);
       } else {
@@ -62,12 +59,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               ? 'Sign in to SendMyPics'
               : mode === 'register'
               ? 'Create host account'
-              : 'Guest access'}
+              : 'Create your account'}
           </h3>
           <p className="text-xs text-slate-400 mt-1">
-            {mode === 'guest'
-              ? 'Enter your name to join event rooms.'
-              : 'Manage created event rooms and uploaded collections.'}
+            Manage your account, rooms, and private photo galleries.
           </p>
         </div>
 
@@ -91,15 +86,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           >
             Register
           </button>
-          <button
-            type="button"
-            onClick={() => setMode('guest')}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${
-              mode === 'guest' ? 'bg-[#1e232e] text-white shadow-sm' : 'text-slate-400 hover:text-white'
-            }`}
-          >
-            Guest pass
-          </button>
         </div>
 
         {errorMsg && (
@@ -109,15 +95,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
-          {(mode === 'register' || mode === 'guest') && (
+          {mode === 'register' && (
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Your name</label>
               <div className="relative">
                 <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
                 <input
                   type="text"
-                  required={mode === 'register'}
-                  placeholder={mode === 'guest' ? 'e.g. Alex Johnson (optional)' : 'e.g. Alex Johnson'}
+                  required
+                  placeholder="e.g. Alex Johnson"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   className="w-full bg-[#0b0c0e] border border-white/[0.1] rounded-lg pl-9 pr-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-[#ff4d2d]"
@@ -126,7 +112,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {mode !== 'guest' && (
+          {(
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Email address</label>
               <div className="relative">
@@ -143,7 +129,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
           )}
 
-          {mode !== 'guest' && (
+          {(
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
               <div className="relative">
@@ -170,7 +156,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 ? 'Sign in'
                 : mode === 'register'
                 ? 'Create account'
-                : 'Continue as guest'}
+                : 'Create account'}
             </span>
           </button>
         </form>
@@ -199,18 +185,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   Sign in
                 </button>
               </>
-            ) : (
-              <>
-                Want a host account?{' '}
-                <button
-                  type="button"
-                  onClick={() => setMode('register')}
-                  className="text-slate-200 hover:underline"
-                >
-                  Register
-                </button>
-              </>
-            )}
+            ) : null}
           </p>
         </div>
       </div>

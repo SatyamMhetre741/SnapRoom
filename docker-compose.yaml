@@ -4,21 +4,32 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     container_name: snaproom-db
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: snaproom
-      POSTGRES_PASSWORD: secretpassword
-      POSTGRES_DB: snaproom
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-MyNewPassword123}
+      POSTGRES_DB: ${POSTGRES_DB:-photo_sharing_db}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./backend/SnapRoom/SnapRoom/src/main/resources/db/migration/V1__initial_schema.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-photo_sharing_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   ai-service:
     build: ./ai-services
     container_name: snaproom-ai
+    restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "${AI_SERVICE_PORT:-8001}:8001"
+    environment:
+      INSIGHTFACE_MODEL: ${INSIGHTFACE_MODEL:-buffalo_l}
+      EXECUTION_PROVIDER: ${EXECUTION_PROVIDER:-CPUExecutionProvider}
+      DET_THRESH: ${DET_THRESH:-0.5}
     command: uvicorn main:app --host 0.0.0.0 --port 8001
     volumes:
       - insightface_cache:/root/.insightface
@@ -29,20 +40,33 @@ services:
       retries: 3
 
   spring-backend:
-    build: ./backend
+    build:
+      context: ./backend/SnapRoom/SnapRoom
+      dockerfile: Dockerfile
     container_name: snaproom-backend
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${SERVER_PORT:-8080}:8080"
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/snaproom
-      SPRING_DATASOURCE_USERNAME: snaproom
-      SPRING_DATASOURCE_PASSWORD: secretpassword
-      STORAGE_BUCKET_NAME: snaproom-photos
-      AWS_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      SERVER_PORT: 8080
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-photo_sharing_db}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-postgres}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-MyNewPassword123}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-https://262af2d41e3ec867962c3fe20b9481c9.r2.cloudflarestorage.com}
+      STORAGE_REGION: ${STORAGE_REGION:-auto}
+      STORAGE_BUCKET_NAME: ${STORAGE_BUCKET_NAME:-${R2_BUCKET_NAME:-snaproom}}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-c2f3f7ac33c26df23f3b151722e361fb}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-c813102ea19d37704fb748ee5258abf748eaf3a533b2f4dbbd6ae8fd6e1d0039}
+      AWS_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-c2f3f7ac33c26df23f3b151722e361fb}
+      AWS_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-c813102ea19d37704fb748ee5258abf748eaf3a533b2f4dbbd6ae8fd6e1d0039}
+      JWT_SECRET: ${JWT_SECRET:-snaproom-super-secret-key-that-is-at-least-256-bits-long-for-jwt-signing-2026!}
+      AI_SERVICE_URL: http://ai-service:8001
+      ROOM_TTL_DAYS: ${ROOM_TTL_DAYS:-2}
     depends_on:
-      - postgres
-      - ai-service
+      postgres:
+        condition: service_healthy
+      ai-service:
+        condition: service_healthy
 
 volumes:
   pgdata:

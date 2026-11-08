@@ -15,18 +15,19 @@ import { Header } from '../components/Header';
 import { AuthModal } from '../components/AuthModal';
 import { authService } from '../services/authService';
 import { roomService } from '../services/roomService';
-import { User, Room } from '../types';
+import { useIsMounted } from '../hooks/useIsMounted';
+import { User } from '../types';
 
 export default function HomePage() {
   const router = useRouter();
+  const isMounted = useIsMounted();
 
-  const [user, setUser] = useState<User | null>(() => {
-    if (typeof window !== 'undefined') {
-      return authService.getCurrentUser();
-    }
-    return null;
-  });
+  const [localUser, setLocalUser] = useState<User | null>(null);
+  const user = localUser || (isMounted ? authService.getCurrentUser() : null);
+  const recentRooms = isMounted ? roomService.getAllLocalRooms() : [];
+
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authNextPath, setAuthNextPath] = useState<string | null>(null);
 
   // Room Creation state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -36,28 +37,14 @@ export default function HomePage() {
   // Join Room with Code
   const [joinCodeInput, setJoinCodeInput] = useState('');
 
-  // Recent rooms
-  const [recentRooms] = useState<Room[]>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('snaproom_local_rooms');
-      if (stored) {
-        try {
-          return JSON.parse(stored);
-        } catch {
-          return [];
-        }
-      }
-    }
-    return [];
-  });
-
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newRoomName.trim()) return;
 
     if (!user) {
-      authService.getOrCreateGuestUser('Event Host');
-      setUser(authService.getCurrentUser());
+      setAuthNextPath(null);
+      setShowAuthModal(true);
+      return;
     }
 
     setIsCreatingRoom(true);
@@ -76,17 +63,22 @@ export default function HomePage() {
     e.preventDefault();
     const clean = joinCodeInput.trim();
     if (!clean) return;
+    if (!user) {
+      setAuthNextPath(`/rooms/${clean}/join`);
+      setShowAuthModal(true);
+      return;
+    }
     router.push(`/rooms/${clean}/join`);
   };
 
   const handleLogout = () => {
     authService.logout();
-    setUser(null);
+    setLocalUser(null);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0c0e] text-slate-100">
-      <Header user={user} onLogout={handleLogout} />
+      <Header user={user} onLogout={handleLogout} onOpenAuth={() => setShowAuthModal(true)} />
 
       <main className="flex-1">
         {/* Editorial Split Hero */}
@@ -337,8 +329,12 @@ export default function HomePage() {
       {showAuthModal && (
         <AuthModal
           onSuccess={(loggedInUser) => {
-            setUser(loggedInUser);
+            setLocalUser(loggedInUser);
             setShowAuthModal(false);
+            if (authNextPath) {
+              router.push(authNextPath);
+              setAuthNextPath(null);
+            }
           }}
           onClose={() => setShowAuthModal(false)}
         />

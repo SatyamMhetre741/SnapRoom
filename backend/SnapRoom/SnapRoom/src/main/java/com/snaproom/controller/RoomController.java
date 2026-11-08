@@ -79,11 +79,42 @@ public class RoomController {
             @RequestParam("selfie") MultipartFile selfie,
             @AuthenticationPrincipal UserPrincipal principal
     ) throws IOException {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
         if (selfie.isEmpty()) {
             throw new IllegalArgumentException("Selfie file is required for face enrollment.");
         }
         EnrollmentResponse response = roomService.enrollMember(inviteCode, selfie, principal.getId());
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/{roomId}/join-requests")
+    public ResponseEntity<List<MemberRequestResponse>> getJoinRequests(
+            @PathVariable UUID roomId,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        return ResponseEntity.ok(roomService.getJoinRequests(roomId, principal.getId()));
+    }
+
+    @PostMapping("/{roomId}/join-requests/{memberId}/approve")
+    public ResponseEntity<Void> approveJoinRequest(
+            @PathVariable UUID roomId,
+            @PathVariable UUID memberId,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        roomService.updateJoinRequest(roomId, memberId, principal.getId(), true);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/{roomId}/join-requests/{memberId}/reject")
+    public ResponseEntity<Void> rejectJoinRequest(
+            @PathVariable UUID roomId,
+            @PathVariable UUID memberId,
+            @AuthenticationPrincipal UserPrincipal principal
+    ) {
+        roomService.updateJoinRequest(roomId, memberId, principal.getId(), false);
+        return ResponseEntity.noContent().build();
     }
 
     /**

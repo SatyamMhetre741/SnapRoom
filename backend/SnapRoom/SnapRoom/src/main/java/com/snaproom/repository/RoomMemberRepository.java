@@ -23,6 +23,8 @@ public interface RoomMemberRepository extends JpaRepository<RoomMember, UUID> {
 
     List<RoomMember> findByRoomId(UUID roomId);
 
+    List<RoomMember> findByRoomIdAndApprovalStatus(UUID roomId, String approvalStatus);
+
     @Query(value = """
         SELECT rm.user_id AS userId,
                CAST((1 - (rm.embedding <=> CAST(:probeVector AS vector))) AS REAL) AS similarityScore

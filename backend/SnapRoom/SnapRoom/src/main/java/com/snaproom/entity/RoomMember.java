@@ -34,9 +34,13 @@ public class RoomMember {
     @Column(nullable = false, length = 20)
     private String role; // "LEADER", "MEMBER"
 
+    @Builder.Default
+    @Column(name = "approval_status", nullable = false, length = 20)
+    private String approvalStatus = "PENDING"; // "PENDING", "APPROVED", "REJECTED"
+
     @JdbcTypeCode(SqlTypes.VECTOR)
     @Array(length = 512)
-    @Column(name = "embedding", nullable = false, columnDefinition = "vector(512)")
+    @Column(name = "embedding", columnDefinition = "vector(512)")
     private float[] embedding;
 
     @Builder.Default

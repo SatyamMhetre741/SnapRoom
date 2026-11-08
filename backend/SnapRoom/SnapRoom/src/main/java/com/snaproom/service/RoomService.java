@@ -77,6 +77,7 @@ public class RoomService {
                 .room(savedRoom)
                 .user(leader)
                 .role("LEADER")
+                .approvalStatus("APPROVED")
                 .build());
 
         return mapToRoomResponse(savedRoom, leaderId);
@@ -124,12 +125,14 @@ public class RoomService {
             member = existingMember.get();
             member.setEmbedding(embedding);
             member.setRole(role);
+            member.setApprovalStatus(isLeader ? "APPROVED" : "PENDING");
         } else {
             member = RoomMember.builder()
                     .room(room)
                     .user(user)
                     .role(role)
                     .embedding(embedding)
+                    .approvalStatus(isLeader ? "APPROVED" : "PENDING")
                     .build();
         }
 
@@ -140,8 +143,38 @@ public class RoomService {
                 room.getId(),
                 savedMember.getRole(),
                 savedMember.getEnrolledAt(),
-                "Face enrolled successfully! 512-D embedding extracted."
+                isLeader ? "Face enrolled successfully!" : "Face enrolled. Your request is waiting for host approval."
         );
+    }
+
+    @Transactional(readOnly = true)
+    public List<MemberRequestResponse> getJoinRequests(UUID roomId, UUID requestingUserId) {
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
+        requireLeader(room, requestingUserId);
+        return roomMemberRepository.findByRoomIdAndApprovalStatus(roomId, "PENDING").stream()
+                .map(member -> new MemberRequestResponse(
+                        member.getId(),
+                        member.getUser().getId(),
+                        member.getUser().getDisplayName(),
+                        member.getUser().getEmail(),
+                        member.getApprovalStatus(),
+                        member.getEnrolledAt()))
+                .toList();
+    }
+
+    @Transactional
+    public void updateJoinRequest(UUID roomId, UUID memberId, UUID requestingUserId, boolean approve) {
+        Room room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new NoSuchElementException("Room not found: " + roomId));
+        requireLeader(room, requestingUserId);
+        RoomMember member = roomMemberRepository.findById(memberId)
+                .orElseThrow(() -> new NoSuchElementException("Join request not found: " + memberId));
+        if (!member.getRoom().getId().equals(roomId)) {
+            throw new IllegalArgumentException("Join request does not belong to this room.");
+        }
+        member.setApprovalStatus(approve ? "APPROVED" : "REJECTED");
+        roomMemberRepository.save(member);
     }
 
     public PresignUploadResponse createPresignedUploadUrl(UUID roomId, PresignUploadRequest request, UUID requestingUserId) {
@@ -374,8 +407,11 @@ public class RoomService {
     }
 
     private void requireMember(Room room, UUID userId) {
-        if (userId == null || (!room.getLeader().getId().equals(userId)
-                && !roomMemberRepository.existsByRoomIdAndUserId(room.getId(), userId))) {
+        boolean isLeader = userId != null && room.getLeader().getId().equals(userId);
+        boolean isApprovedMember = userId != null && roomMemberRepository.findByRoomIdAndUserId(room.getId(), userId)
+                .map(member -> "APPROVED".equals(member.getApprovalStatus()))
+                .orElse(false);
+        if (!isLeader && !isApprovedMember) {
             throw new org.springframework.security.access.AccessDeniedException("You are not a member of this room.");
         }
     }
@@ -385,13 +421,16 @@ public class RoomService {
         long photoCount = photoRepository.countByRoomId(room.getId());
 
         String userRole = "MEMBER";
+        String membershipStatus = "NONE";
         if (currentUserId != null) {
             if (room.getLeader().getId().equals(currentUserId)) {
                 userRole = "LEADER";
+                membershipStatus = "APPROVED";
             } else {
                 Optional<RoomMember> member = roomMemberRepository.findByRoomIdAndUserId(room.getId(), currentUserId);
                 if (member.isPresent()) {
                     userRole = member.get().getRole();
+                    membershipStatus = member.get().getApprovalStatus();
                 }
             }
         }
@@ -405,7 +444,8 @@ public class RoomService {
                 room.getExpiresAt(),
                 memberCount,
                 photoCount,
-                userRole
+                userRole,
+                membershipStatus
         );
     }
 

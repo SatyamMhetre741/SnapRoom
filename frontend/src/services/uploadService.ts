@@ -11,23 +11,13 @@ export const uploadService = {
     fileName: string,
     contentType: string
   ): Promise<PresignUploadItemResponse> {
-    try {
-      return await apiRequest<PresignUploadItemResponse>(
+    return apiRequest<PresignUploadItemResponse>(
         `/rooms/${roomId}/presign-upload`,
         {
           method: 'POST',
           body: JSON.stringify({ fileName, contentType }),
         }
       );
-    } catch {
-      // Fallback objectKey for demo/offline preview
-      const objectKey = `rooms/${roomId}/${Date.now()}-${fileName.replace(/\s+/g, '_')}`;
-      return {
-        objectKey,
-        uploadUrl: `https://mock-storage.snaproom.local/${objectKey}`,
-        fileName,
-      };
-    }
   },
 
   /**
@@ -40,20 +30,6 @@ export const uploadService = {
     onProgress?: (percent: number) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
-      // If mock url in offline preview, simulate upload
-      if (uploadUrl.includes('mock-storage.snaproom.local')) {
-        let simulated = 0;
-        const interval = setInterval(() => {
-          simulated += 25;
-          if (onProgress) onProgress(Math.min(simulated, 100));
-          if (simulated >= 100) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 150);
-        return;
-      }
-
       const xhr = new XMLHttpRequest();
       xhr.open('PUT', uploadUrl, true);
       xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
@@ -162,6 +138,11 @@ export const uploadService = {
       () => runWorker()
     );
     await Promise.all(workers);
+
+    const failed = progressList.filter((item) => item.status === 'error');
+    if (failed.length > 0 && uploadedKeys.length === 0) {
+      throw new Error(failed[0].error || 'No photos could be uploaded.');
+    }
 
     // Trigger AI photo processing for successful uploads
     if (uploadedKeys.length > 0) {

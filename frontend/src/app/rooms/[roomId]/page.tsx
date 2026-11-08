@@ -9,24 +9,26 @@ import {
   Loader2,
 } from 'lucide-react';
 import { Header } from '../../../components/Header';
+import { AuthModal } from '../../../components/AuthModal';
 import { RoomGallery } from '../../../components/RoomGallery';
 import { PhotoUploader } from '../../../components/PhotoUploader';
 import { RoomInviteModal } from '../../../components/RoomInviteModal';
 import { roomService } from '../../../services/roomService';
 import { authService } from '../../../services/authService';
-import { Room, User, RoomRole } from '../../../types';
+import { useIsMounted } from '../../../hooks/useIsMounted';
+import { Room, RoomRole } from '../../../types';
 
 function RoomWorkspaceContent() {
   const params = useParams();
   const router = useRouter();
   const roomId = (params?.roomId as string) || '';
+  const isMounted = useIsMounted();
 
-  const [currentUser] = useState<User | null>(() => {
-    if (typeof window !== 'undefined') {
-      return authService.getCurrentUser() || authService.getOrCreateGuestUser('Host User');
-    }
-    return null;
-  });
+  const currentUser = isMounted ? authService.getCurrentUser() : null;
+  const [localUser, setLocalUser] = useState(currentUser);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [roomError, setRoomError] = useState<string | null>(null);
+  const [joinRequests, setJoinRequests] = useState<import('../../../types').MemberRequest[]>([]);
   const [room, setRoom] = useState<Room | null>(null);
   const [userRole, setUserRole] = useState<RoomRole>('LEADER');
 
@@ -48,7 +50,7 @@ function RoomWorkspaceContent() {
           }
         })
         .catch((err) => {
-          console.warn('Could not load room:', err);
+          setRoomError((err as Error).message || 'You do not have access to this room yet.');
         });
     }
 
@@ -56,6 +58,18 @@ function RoomWorkspaceContent() {
       isMounted = false;
     };
   }, [roomId]);
+
+  useEffect(() => {
+    if (room?.userRole === 'LEADER') {
+      roomService.getJoinRequests(roomId).then(setJoinRequests).catch(() => setJoinRequests([]));
+    }
+  }, [room, roomId]);
+
+  const updateRequest = async (memberId: string, approve: boolean) => {
+    if (approve) await roomService.approveJoinRequest(roomId, memberId);
+    else await roomService.rejectJoinRequest(roomId, memberId);
+    setJoinRequests((requests) => requests.filter((request) => request.memberId !== memberId));
+  };
 
   const handleUploadSuccess = () => {
     setShowUploadModal(false);
@@ -68,11 +82,12 @@ function RoomWorkspaceContent() {
     <div className="min-h-screen flex flex-col bg-[#0b0c0e] text-slate-100">
       {/* Top Navbar */}
       <Header
-        user={currentUser}
+        user={localUser || currentUser}
         roomName={room?.name}
         role={userRole}
         onOpenInvite={() => setShowInviteModal(true)}
         onOpenUpload={isLeader ? () => setShowUploadModal(true) : undefined}
+        onOpenAuth={() => setShowAuthModal(true)}
       />
 
       <main className="flex-1">
@@ -117,32 +132,8 @@ function RoomWorkspaceContent() {
                 </div>
               </div>
 
-              {/* Right Column: Role Switcher & Actions */}
+              {/* Right Column: Actions */}
               <div className="flex flex-wrap items-center gap-2.5">
-                {/* Switch Role Pill (For testing/previewing host vs guest experiences) */}
-                <div className="flex items-center rounded-lg bg-[#14171d] p-1 border border-white/[0.08] text-xs">
-                  <button
-                    onClick={() => setUserRole('LEADER')}
-                    className={`px-3 py-1 rounded-md font-medium transition-colors ${
-                      userRole === 'LEADER'
-                        ? 'bg-[#1e232e] text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Host
-                  </button>
-                  <button
-                    onClick={() => setUserRole('MEMBER')}
-                    className={`px-3 py-1 rounded-md font-medium transition-colors ${
-                      userRole === 'MEMBER'
-                        ? 'bg-[#1e232e] text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Attendee
-                  </button>
-                </div>
-
                 <button
                   onClick={() => setShowInviteModal(true)}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-white/[0.1] bg-[#14171d] px-3.5 py-2 text-xs font-medium text-slate-200 hover:bg-[#1a1e27] transition-colors"
@@ -166,11 +157,12 @@ function RoomWorkspaceContent() {
         </section>
 
         {/* Gallery Workspace */}
-        <RoomGallery
-          roomId={roomId}
-          isLeader={isLeader}
-          onOpenUpload={() => setShowUploadModal(true)}
-        />
+        {roomError ? (
+          <div className="max-w-xl mx-auto px-4 py-20 text-center"><h2 className="text-xl font-semibold text-white">Room access is pending</h2><p className="mt-2 text-sm text-slate-400">{roomError}. If you have not requested access yet, use the invite link to complete face enrollment.</p></div>
+        ) : room ? <>
+          {isLeader && joinRequests.length > 0 && <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8"><div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4"><h2 className="text-sm font-semibold text-white">Join requests ({joinRequests.length})</h2><div className="mt-3 space-y-2">{joinRequests.map((request) => <div key={request.memberId} className="flex items-center justify-between gap-3 rounded-lg bg-black/20 p-3"><div><p className="text-sm text-slate-200">{request.displayName}</p><p className="text-xs text-slate-500">{request.email}</p></div><div className="flex gap-2"><button onClick={() => void updateRequest(request.memberId, false)} className="rounded-md border border-white/10 px-3 py-1.5 text-xs text-slate-300">Reject</button><button onClick={() => void updateRequest(request.memberId, true)} className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs text-white">Approve</button></div></div>)}</div></div></section>}
+          <RoomGallery roomId={roomId} isLeader={isLeader} onOpenUpload={() => setShowUploadModal(true)} />
+        </> : <div className="py-20 text-center text-sm text-slate-400">Loading room...</div>}
       </main>
 
       {/* Upload Photos Modal */}
@@ -190,6 +182,7 @@ function RoomWorkspaceContent() {
           onClose={() => setShowInviteModal(false)}
         />
       )}
+      {(showAuthModal || (isMounted && !currentUser && !localUser)) && <AuthModal onSuccess={(user) => { setLocalUser(user); setShowAuthModal(false); window.location.reload(); }} onClose={() => setShowAuthModal(false)} />}
     </div>
   );
 }

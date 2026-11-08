@@ -6,24 +6,26 @@ import Link from 'next/link';
 import { ArrowLeft, Check, Loader2 } from 'lucide-react';
 import { WebcamEnroll } from '../../../../components/WebcamEnroll';
 import { Header } from '../../../../components/Header';
+import { AuthModal } from '../../../../components/AuthModal';
 import { roomService } from '../../../../services/roomService';
 import { authService } from '../../../../services/authService';
-import { Room, User, EnrollmentResponse } from '../../../../types';
+import { useIsMounted } from '../../../../hooks/useIsMounted';
+import { Room, EnrollmentResponse } from '../../../../types';
 
 function JoinRoomContent() {
   const params = useParams();
   const router = useRouter();
   const inviteCode = (params?.roomId as string) || (params?.inviteCode as string) || '';
+  const isMounted = useIsMounted();
 
   const [room, setRoom] = useState<Room | null>(null);
-  const [currentUser] = useState<User | null>(() => {
-    if (typeof window !== 'undefined') {
-      return authService.getCurrentUser() || authService.getOrCreateGuestUser('Guest Attendee');
-    }
-    return null;
-  });
+  const currentUser = isMounted
+    ? authService.getCurrentUser()
+    : null;
   const [isLoadingRoom, setIsLoadingRoom] = useState(Boolean(inviteCode));
   const [enrollmentSuccess, setEnrollmentSuccess] = useState<EnrollmentResponse | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [localUser, setLocalUser] = useState(currentUser);
 
   useEffect(() => {
     let isMounted = true;
@@ -51,15 +53,11 @@ function JoinRoomContent() {
 
   const handleEnrolled = (result: EnrollmentResponse) => {
     setEnrollmentSuccess(result);
-    setTimeout(() => {
-      const destinationRoomId = result.roomId || room?.id || 'demo-room';
-      router.push(`/rooms/${destinationRoomId}`);
-    }, 1200);
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0b0c0e] text-slate-100">
-      <Header user={currentUser} />
+      <Header user={localUser || currentUser} onOpenAuth={() => setShowAuthModal(true)} />
 
       <main className="flex-1 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8">
         <div className="w-full max-w-md mx-auto">
@@ -93,13 +91,11 @@ function JoinRoomContent() {
               <div className="h-12 w-12 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto mb-3">
                 <Check className="h-6 w-6" />
               </div>
-              <h3 className="text-lg font-semibold text-white mb-1">Face matched</h3>
+              <h3 className="text-lg font-semibold text-white mb-1">Request submitted</h3>
               <p className="text-xs text-slate-400 leading-relaxed mb-4">
-                Opening your personalized event gallery now...
+                Your face was enrolled successfully. The host must approve your request before you can enter the room or view photos.
               </p>
-              <div className="h-1 w-36 mx-auto rounded-full bg-white/10 overflow-hidden">
-                <div className="h-full bg-emerald-500 w-full animate-pulse" />
-              </div>
+              <button onClick={() => router.push('/')} className="rounded-lg bg-[#ff4d2d] px-4 py-2 text-xs font-medium text-white">Return home</button>
             </div>
           ) : (
             <WebcamEnroll
@@ -110,6 +106,13 @@ function JoinRoomContent() {
           )}
         </div>
       </main>
+      {(showAuthModal || (isMounted && !currentUser && !localUser)) && (
+        <AuthModal
+          initialMode="login"
+          onSuccess={(user) => { setLocalUser(user); setShowAuthModal(false); }}
+          onClose={() => setShowAuthModal(false)}
+        />
+      )}
     </div>
   );
 }

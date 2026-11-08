@@ -1,4 +1,5 @@
 export type RoomRole = 'LEADER' | 'MEMBER';
+export type MembershipStatus = 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
 export type PhotoStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -18,6 +19,7 @@ export interface Room {
   memberCount?: number;
   photoCount?: number;
   userRole?: RoomRole;
+  membershipStatus?: MembershipStatus;
 }
 
 export interface PhotoItem {
@@ -54,6 +56,15 @@ export interface EnrollmentResponse {
   role: RoomRole;
   enrolledAt: string;
   message?: string;
+}
+
+export interface MemberRequest {
+  memberId: string;
+  userId: string;
+  displayName: string;
+  email: string;
+  approvalStatus: 'PENDING' | 'APPROVED' | 'REJECTED';
+  enrolledAt: string;
 }
 
 export interface RoomStatusResponse {

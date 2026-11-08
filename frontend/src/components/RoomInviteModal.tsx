@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { X, Copy, Check } from 'lucide-react';
+import { useIsMounted } from '../hooks/useIsMounted';
 
 interface RoomInviteModalProps {
   inviteCode: string;
@@ -17,8 +18,9 @@ export const RoomInviteModal: React.FC<RoomInviteModalProps> = ({
 }) => {
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const isMounted = useIsMounted();
 
-  const joinUrl = typeof window !== 'undefined'
+  const joinUrl = isMounted
     ? `${window.location.origin}/rooms/${inviteCode}/join`
     : `https://sendmypics.app/rooms/${inviteCode}/join`;
 
